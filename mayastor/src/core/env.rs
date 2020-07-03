@@ -576,7 +576,7 @@ impl MayastorEnvironment {
 
     /// We implement our own default target init code here. Note that if there
     /// is an existing target we will fail the init process.
-    extern "C" fn target_init() -> Result<(), EnvError> {
+    fn target_init() -> Result<(), EnvError> {
         let address = MayastorEnvironment::get_pod_ip().map_err(|e| {
             error!("Invalid IP address: MY_POD_IP={}", e);
             mayastor_env_stop(-1);

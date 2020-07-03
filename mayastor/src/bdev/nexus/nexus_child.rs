@@ -4,15 +4,22 @@ use nix::errno::Errno;
 use serde::{export::Formatter, Serialize};
 use snafu::{ResultExt, Snafu};
 
-use spdk_sys::{spdk_bdev_module_release_bdev, spdk_io_channel};
+use spdk_sys::{
+    spdk_bdev_module_release_bdev,
+    spdk_bdev_reset,
+    spdk_io_channel,
+};
 
 use crate::{
     bdev::NexusErrStore,
     core::{Bdev, BdevHandle, CoreError, Descriptor, DmaBuf},
+    ffihelper::cb_arg,
     nexus_uri::{bdev_destroy, NexusBdevError},
     rebuild::{ClientOperations, RebuildJob},
     subsys::Config,
 };
+
+use futures::channel::oneshot;
 
 #[derive(Debug, Snafu)]
 pub enum ChildError {
@@ -449,5 +456,36 @@ impl NexusChild {
         self.get_rebuild_job()
             .map(|j| j.stats().progress as i32)
             .unwrap_or_else(|| -1)
+    }
+
+    /// Reset the child to enforce all I/Os are aborted
+    pub async fn reset(&self) {
+        let (sender, receiver) = oneshot::channel::<bool>();
+        unsafe {
+            spdk_bdev_reset(
+                self.desc.as_ref().unwrap().as_ptr(),
+                self.bdev_handle.as_ref().unwrap().channel.as_ptr(),
+                Some(spdk_reset_cb),
+                cb_arg(sender),
+            );
+        }
+        let res = receiver.await.expect("Failed to complete reset");
+        if !res {
+            info!("Failed to reset child {}", self.name);
+            panic!();
+        }
+    }
+}
+
+extern "C" fn spdk_reset_cb(
+    _io: *mut spdk_sys::spdk_bdev_io,
+    result: bool,
+    ctx: *mut nix::libc::c_void,
+) {
+    unsafe {
+        let s = Box::from_raw(ctx as *mut oneshot::Sender<bool>);
+        if let Err(e) = s.send(result) {
+            panic!("Failed to send SPDK completion with error {}.", e);
+        }
     }
 }

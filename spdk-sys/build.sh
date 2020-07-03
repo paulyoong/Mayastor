@@ -1,4 +1,4 @@
-#!/bin/env bash
+#!/bin/bash
 # This script replicates the build of libspdk as its done by nix without setting
 # any specifics in terms of CPU. The purpose is to easily make changes to libspdk
 # locally and then recompile it and test it with mayastor.

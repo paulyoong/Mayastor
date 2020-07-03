@@ -224,12 +224,19 @@ impl Nexus {
             Some(val) => val,
         };
 
-        self.children[idx].close();
-        assert_eq!(self.children[idx].state, ChildState::Closed);
-
+        // We want to remove the child from the nexus list before reconfiguring
+        // to ensure the child does not receive any further I/Os
         let mut child = self.children.remove(idx);
         self.child_count -= 1;
         self.reconfigure(DREvent::ChildRemove).await;
+
+        // Reset the child to flush any in-flight I/Os
+        child.reset().await;
+
+        // Close the child
+        child.close();
+        assert_eq!(child.state, ChildState::Closed);
+
         child.destroy().await.context(DestroyChild {
             name: self.name.clone(),
             child: uri,
