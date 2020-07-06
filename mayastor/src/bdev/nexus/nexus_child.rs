@@ -458,8 +458,10 @@ impl NexusChild {
             .unwrap_or_else(|| -1)
     }
 
-    /// Reset the child to enforce all I/Os are aborted
-    pub async fn reset(&self) {
+    /// Reset a child bdev.
+    /// This aborts all outstanding I/Os issued to the bdev for the given
+    /// I/O channel.
+    pub async fn reset(&self) -> bool {
         let (sender, receiver) = oneshot::channel::<bool>();
         unsafe {
             spdk_bdev_reset(
@@ -469,23 +471,22 @@ impl NexusChild {
                 cb_arg(sender),
             );
         }
-        let res = receiver.await.expect("Failed to complete reset");
-        if !res {
-            info!("Failed to reset child {}", self.name);
-            panic!();
-        }
+        receiver.await.expect("Failed to complete reset")
     }
 }
 
+/// Called when spdk_bdev_reset completes.
+/// The "io" parameter representing the reset is not of interest here. Instead,
+/// we care about whether the reset operation succeeded or failed.
 extern "C" fn spdk_reset_cb(
     _io: *mut spdk_sys::spdk_bdev_io,
-    result: bool,
-    ctx: *mut nix::libc::c_void,
+    success: bool,
+    arg: *mut ::std::os::raw::c_void,
 ) {
     unsafe {
-        let s = Box::from_raw(ctx as *mut oneshot::Sender<bool>);
-        if let Err(e) = s.send(result) {
-            panic!("Failed to send SPDK completion with error {}.", e);
+        let s = Box::from_raw(arg as *mut oneshot::Sender<bool>);
+        if let Err(e) = s.send(success) {
+            panic!("Failed to send SPDK completion with error {}", e);
         }
     }
 }

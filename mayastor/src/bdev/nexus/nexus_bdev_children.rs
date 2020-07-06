@@ -224,16 +224,21 @@ impl Nexus {
             Some(val) => val,
         };
 
-        // We want to remove the child from the nexus list before reconfiguring
-        // to ensure the child does not receive any further I/Os
+        // Remove the child from the nexus list before reconfiguring to ensure
+        // the child does not receive any further I/Os
         let mut child = self.children.remove(idx);
         self.child_count -= 1;
         self.reconfigure(DREvent::ChildRemove).await;
 
-        // Reset the child to flush any in-flight I/Os
-        child.reset().await;
+        // Issue a reset to abort I/Os already issued to the child.
+        // If, after multiple tries, the reset fails, we still attempt to
+        // close the child.
+        let mut retries = 3;
+        while retries > 0 && !child.reset().await {
+            info!("Failed to reset child {}", child.name);
+            retries -= 1;
+        }
 
-        // Close the child
         child.close();
         assert_eq!(child.state, ChildState::Closed);
 
