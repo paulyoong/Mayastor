@@ -104,24 +104,30 @@ impl RebuildJob {
     /// Returns a new rebuild job based on the parameters
     pub(super) fn new(
         nexus: &str,
-        source: &str,
+        sources: Vec<String>,
         destination: &str,
         range: std::ops::Range<u64>,
         notify_fn: fn(String, String) -> (),
     ) -> Result<Self, RebuildError> {
-        let source_hdl = BdevHandle::open(
-            &bdev_get_name(source).context(BdevInvalidURI {
-                uri: source.to_string(),
-            })?,
-            false,
-            false,
-        )
-        .context(NoBdevHandle {
-            bdev: source,
-        })?;
+        let source_handles = sources
+            .iter()
+            .map(|s| -> Result<BdevHandle, RebuildError> {
+                BdevHandle::open(
+                    &bdev_get_name(s).context(BdevInvalidURI {
+                        uri: s,
+                    })?,
+                    false,
+                    false,
+                )
+                .context(NoBdevHandle {
+                    bdev: s,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         let destination_hdl = BdevHandle::open(
             &bdev_get_name(destination).context(BdevInvalidURI {
-                uri: source.to_string(),
+                uri: destination.to_string(),
             })?,
             true,
             false,
@@ -130,13 +136,20 @@ impl RebuildJob {
             bdev: destination,
         })?;
 
-        if !Self::validate(
-            &source_hdl.get_bdev(),
-            &destination_hdl.get_bdev(),
-            &range,
-        ) {
-            return Err(RebuildError::InvalidParameters {});
-        };
+        // Validate all sources
+        source_handles
+            .iter()
+            .map(|h| {
+                match Self::validate(
+                    &h.get_bdev(),
+                    &destination_hdl.get_bdev(),
+                    &range,
+                ) {
+                    true => Ok(()),
+                    false => Err(RebuildError::InvalidParameters {}),
+                }
+            })
+            .collect::<Result<_, _>>()?;
 
         // validation passed, block size is the same for both
         let block_size = destination_hdl.get_bdev().block_len() as u64;
@@ -163,11 +176,7 @@ impl RebuildJob {
             });
         }
 
-        let (source, destination, nexus) = (
-            source.to_string(),
-            destination.to_string(),
-            nexus.to_string(),
-        );
+        let (destination, nexus) = (destination.to_string(), nexus.to_string());
 
         let nexus_descriptor =
             Bdev::open_by_name(&nexus, false).context(BdevNotFound {
@@ -177,8 +186,9 @@ impl RebuildJob {
         Ok(Self {
             nexus,
             nexus_descriptor,
-            source,
-            source_hdl,
+            sources,
+            source_handles,
+            src_index: 0,
             destination,
             destination_hdl,
             next: range.start,
@@ -327,11 +337,20 @@ impl RebuildJob {
             &mut copy_buffer
         };
 
-        self.source_hdl
+        // get the source index to read from then increment
+        // so the next copy uses a different source
+        let src_idx = self.src_index;
+        if src_idx == (self.source_handles.len() - 1) {
+            self.src_index = 0;
+        } else {
+            self.src_index += 1;
+        }
+
+        self.source_handles[src_idx]
             .read_at(blk * self.block_size, copy_buffer)
             .await
             .context(ReadIoError {
-                bdev: &self.source,
+                bdev: &self.sources[src_idx],
             })?;
 
         self.destination_hdl
@@ -481,7 +500,7 @@ impl ClientOperations for RebuildJob {
             "State: {}, Src: {}, Dst: {}, range: {:?}, next: {}, \
              block_size: {}, segment_sz: {}, recovered_blks: {}, progress: {}%",
             self.state(),
-            self.source,
+            self.sources[0],
             self.destination,
             self.range,
             self.next,

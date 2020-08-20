@@ -114,9 +114,12 @@ pub struct RebuildJob {
     pub nexus: String,
     /// descriptor for the nexus
     pub(super) nexus_descriptor: Descriptor,
-    /// source URI of the healthy child to rebuild from
-    pub source: String,
-    pub(super) source_hdl: BdevHandle,
+    /// source URIs to rebuild from
+    pub sources: Vec<String>,
+    /// source handles to rebuild from
+    pub(super) source_handles: Vec<BdevHandle>,
+    /// index of the source to rebuild from
+    pub src_index: usize,
     /// target URI of the out of sync child in need of a rebuild
     pub destination: String,
     pub(super) destination_hdl: BdevHandle,
@@ -180,12 +183,12 @@ impl RebuildJob {
     /// URI as arguments
     pub fn create<'a>(
         nexus: &str,
-        source: &str,
+        sources: Vec<String>,
         destination: &'a str,
         range: std::ops::Range<u64>,
         notify_fn: fn(String, String) -> (),
     ) -> Result<&'a mut Self, RebuildError> {
-        Self::new(nexus, source, destination, range, notify_fn)?.store()?;
+        Self::new(nexus, sources, destination, range, notify_fn)?.store()?;
 
         Ok(Self::lookup(destination)?)
     }
@@ -205,7 +208,7 @@ impl RebuildJob {
     pub fn lookup_src(name: &str) -> Vec<&mut Self> {
         Self::get_instances()
             .iter_mut()
-            .filter(|j| j.1.source == name)
+            .filter(|j| j.1.sources.contains(&name.to_string()))
             .map(|j| j.1.as_mut())
             .collect::<Vec<_>>()
     }

@@ -33,16 +33,14 @@ impl Nexus {
     ) -> Result<Receiver<RebuildState>, Error> {
         trace!("{}: start rebuild request for {}", self.name, name);
 
-        let src_child_name = match self
+        let src_children_names = self
             .children
             .iter()
-            .find(|c| c.state == ChildState::Open && c.name != name)
-        {
-            Some(child) => Ok(child.name.clone()),
-            None => Err(Error::NoRebuildSource {
-                name: self.name.clone(),
-            }),
-        }?;
+            .filter(|&c| c.state == ChildState::Open && c.name != name)
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|&c| c.name.clone())
+            .collect();
 
         let dst_child_name =
             match self.children.iter_mut().find(|c| c.name == name) {
@@ -62,7 +60,7 @@ impl Nexus {
 
         let job = RebuildJob::create(
             &self.name,
-            &src_child_name,
+            src_children_names,
             &dst_child_name,
             std::ops::Range::<u64> {
                 start: self.data_ent_offset,
