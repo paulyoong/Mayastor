@@ -232,6 +232,8 @@ pub enum Error {
     FailedGetHandle,
     #[snafu(display("Failed to create snapshot"))]
     FailedCreateSnapshot,
+    #[snafu(display("Validation failed"))]
+    ValidationFailed,
 }
 
 impl From<Error> for tonic::Status {
