@@ -3,7 +3,10 @@
 
 use crate::bdev::{
     nexus::{
-        nexus_bdev::{Error, Error::ValidationFailed},
+        nexus_bdev::{
+            Error,
+            Error::{NexusNotFound, ValidationFailed},
+        },
         nexus_child::{NexusChild, StatusReasons},
         nexus_child_status_config::ChildStatusConfig,
     },
@@ -12,7 +15,28 @@ use crate::bdev::{
     Nexus,
     NexusStatus,
 };
+use snafu::Snafu;
 use std::future::Future;
+
+#[derive(Debug, Snafu)]
+#[snafu(visibility = "pub(crate)")]
+pub enum NexusValidationError {
+    #[snafu(display("The nexus {} is in the faulted state", name))]
+    Faulted { name: String },
+    #[snafu(display("The nexus {} does not have any healthy children", name))]
+    NoHealthyChild { name: String },
+    #[snafu(display(
+        "Child {} of nexus {} is the only healthy child",
+        child_name,
+        nexus_name
+    ))]
+    LastHealthyChild {
+        child_name: String,
+        nexus_name: String,
+    },
+    #[snafu(display("Failed to update the child status configuration"))]
+    FailedUpdateChildStatusConfig,
+}
 
 /// Perform add child validation. If this passes, execute the future.
 pub(crate) async fn add_child<F>(
@@ -24,8 +48,20 @@ where
     F: Future<Output = Result<NexusStatus, Error>>,
 {
     let nexus = nexus_exists(nexus_name)?;
-    if is_nexus_faulted(&nexus) || !has_healthy_child(&nexus) {
-        return Err(ValidationFailed);
+    if is_nexus_faulted(&nexus) {
+        return Err(ValidationFailed {
+            source: NexusValidationError::Faulted {
+                name: nexus.name.clone(),
+            },
+        });
+    }
+
+    if !has_healthy_child(&nexus) {
+        return Err(ValidationFailed {
+            source: NexusValidationError::NoHealthyChild {
+                name: nexus.name.clone(),
+            },
+        });
     }
 
     // Add the child to the status configuration as out-of-sync.
@@ -34,11 +70,18 @@ where
     let mut status_reasons = StatusReasons::new();
     status_reasons.out_of_sync(true);
     if ChildStatusConfig::add(child_name, &status_reasons).is_err() {
-        // TODO: different error message?
-        return Err(ValidationFailed);
+        return Err(ValidationFailed {
+            source: NexusValidationError::FailedUpdateChildStatusConfig {},
+        });
     }
 
-    future.await
+    match future.await {
+        Ok(value) => Ok(value),
+        Err(e) => {
+            rollback_child_status_config();
+            Err(e)
+        }
+    }
 }
 
 /// Perform remove child validation. If this passes, execute the future.
@@ -56,52 +99,53 @@ where
             name: nexus_name.to_string(),
             child: child_name.to_string(),
         });
-    } else if is_last_healthy_child(nexus, child_name) {
-        return Err(ValidationFailed);
+    }
+
+    if is_last_healthy_child(nexus, child_name) {
+        return Err(ValidationFailed {
+            source: NexusValidationError::LastHealthyChild {
+                child_name: child_name.to_string(),
+                nexus_name: nexus_name.to_string(),
+            },
+        });
     }
 
     if ChildStatusConfig::remove(child_name).is_err() {
-        // TODO: different error message?
-        return Err(ValidationFailed);
+        return Err(ValidationFailed {
+            source: NexusValidationError::FailedUpdateChildStatusConfig {},
+        });
     }
 
-    future.await?;
-    Ok(())
+    match future.await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            rollback_child_status_config();
+            Err(e)
+        }
+    }
 }
 
 // Checks if a given nexus exists
 fn nexus_exists(nexus_name: &str) -> Result<&Nexus, Error> {
     match nexus_lookup(nexus_name) {
         Some(nexus) => Ok(nexus),
-        None => {
-            error!("Failed to find nexus");
-            Err(ValidationFailed)
-        }
+        None => Err(NexusNotFound {
+            name: nexus_name.to_string(),
+        }),
     }
 }
 
 /// Checks if a nexus is in the faulted state
 fn is_nexus_faulted(nexus: &Nexus) -> bool {
-    if nexus.status() == NexusStatus::Faulted {
-        error!("Nexus is faulted");
-        true
-    } else {
-        false
-    }
+    nexus.status() == NexusStatus::Faulted
 }
 
 /// Checks if a nexus has at least one healthy child
 fn has_healthy_child(nexus: &Nexus) -> bool {
-    if nexus
+    nexus
         .children
         .iter()
         .any(|c| c.status() == ChildStatus::Online)
-    {
-        true
-    } else {
-        error!("Nexus does not have any healthy children");
-        false
-    }
 }
 
 // Checks if the child is the last remaining healthy child
@@ -112,13 +156,11 @@ fn is_last_healthy_child(nexus: &Nexus, child_name: &str) -> bool {
         .filter(|child| child.status() == ChildStatus::Online)
         .collect::<Vec<&NexusChild>>();
 
-    if healthy_children.len() == 1 && healthy_children[0].name == child_name {
-        error!(
-            "Child {} of nexus {} is the last healthy child",
-            child_name, nexus.name
-        );
-        true
-    } else {
-        false
+    healthy_children.len() == 1 && healthy_children[0].name == child_name
+}
+
+fn rollback_child_status_config() {
+    if ChildStatusConfig::save().is_err() {
+        error!("Failed to save child status configuration");
     }
 }

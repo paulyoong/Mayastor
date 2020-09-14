@@ -119,6 +119,8 @@ impl ChildStatusConfig {
     }
 
     /// Update the configuration to remove the child.
+    /// The child is manually removed here because it won't yet be removed from
+    /// the list of nexus children.
     pub(crate) fn remove(child_name: &str) -> Result<(), std::io::Error> {
         let mut cfg = ChildStatusConfig::get_running_cfg();
         if cfg.status.contains_key(child_name) {
@@ -128,7 +130,7 @@ impl ChildStatusConfig {
         ChildStatusConfig::do_save(&cfg)
     }
 
-    // Update the status of the child
+    // Update the status of the child in the configuration.
     pub(crate) fn update(child: &NexusChild) -> Result<(), std::io::Error> {
         let cfg_file;
         unsafe {
@@ -175,6 +177,12 @@ impl ChildStatusConfig {
                 "failed to serialize status config",
             )),
         }
+    }
+
+    /// Save the state of the running configuration.
+    pub(crate) fn save() -> Result<(), std::io::Error> {
+        let cfg = ChildStatusConfig::get_running_cfg();
+        ChildStatusConfig::do_save(&cfg)
     }
 
     /// Initialise the config file location
