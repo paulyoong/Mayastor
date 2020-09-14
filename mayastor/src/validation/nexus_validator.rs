@@ -64,9 +64,9 @@ where
         });
     }
 
-    // Add the child to the status configuration as out-of-sync.
-    // The status configuration will be updated automatically when the newly
-    // added child comes online.
+    // Add the child to the status configuration as out-of-sync before executing
+    // the future. The status configuration will be updated automatically
+    // when the newly added child comes online.
     let mut status_reasons = StatusReasons::new();
     status_reasons.out_of_sync(true);
     if ChildStatusConfig::add(child_name, &status_reasons).is_err() {
@@ -75,7 +75,7 @@ where
         });
     }
 
-    // Validation has passed, execute the operation
+    // Validation has passed, execute the "add child" future.
     match future.await {
         Ok(value) => Ok(value),
         Err(e) => {
@@ -111,13 +111,14 @@ where
         });
     }
 
+    // Remove the child from the configuration before executing the future
     if ChildStatusConfig::remove(child_name).is_err() {
         return Err(ValidationFailed {
             source: NexusValidationError::FailedUpdateChildStatusConfig {},
         });
     }
 
-    // Validation has passed, execute the operation
+    // Validation has passed, execute the "remove child" future.
     match future.await {
         Ok(_) => Ok(()),
         Err(e) => {
