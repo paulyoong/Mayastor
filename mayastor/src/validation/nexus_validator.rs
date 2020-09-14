@@ -75,6 +75,7 @@ where
         });
     }
 
+    // Validation has passed, execute the operation
     match future.await {
         Ok(value) => Ok(value),
         Err(e) => {
@@ -116,6 +117,7 @@ where
         });
     }
 
+    // Validation has passed, execute the operation
     match future.await {
         Ok(_) => Ok(()),
         Err(e) => {
@@ -159,7 +161,12 @@ fn is_last_healthy_child(nexus: &Nexus, child_name: &str) -> bool {
     healthy_children.len() == 1 && healthy_children[0].name == child_name
 }
 
+/// Attempt to rollback changes to the status configuration. This is called when
+/// an operation fails. The best we can do here is to save the current status of
+/// the running system as it is not known at what point the operation failed.
 fn rollback_child_status_config() {
+    // TODO: Determine what to do in this case. If the operation itself has
+    // succeeded the running system is still good.
     if ChildStatusConfig::save().is_err() {
         error!("Failed to save child status configuration");
     }
