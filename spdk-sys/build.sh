@@ -9,14 +9,14 @@ rm libspdk.so
 [ ! -d dpdk/.git ] || { echo "Submodules not checked out?"; exit; }
 
 
-#./configure --enable-debug \
-#	--target-arch=nehalem \
-#	--disable-tests \
-#	--without-isal \
-#	--with-iscsi-initiator \
-#	--with-crypto \
-#	--with-uring \
-#	--disable-unit-tests
+./configure --enable-debug \
+	--target-arch=nehalem \
+	--disable-tests \
+	--without-isal \
+	--with-iscsi-initiator \
+	--with-crypto \
+	--with-uring \
+	--disable-unit-tests
 
 make -j $(nproc)
 

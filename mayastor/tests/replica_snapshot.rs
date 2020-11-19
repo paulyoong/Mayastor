@@ -104,6 +104,7 @@ fn share_snapshot(t: u64) {
     ]);
 }
 
+#[ignore]
 #[test]
 fn replica_snapshot() {
     generate_config();
