@@ -21,6 +21,8 @@ const UUID = 'dbe4d7eb-118a-4d15-b789-a18d9af6ff21';
 const UUID2 = 'dbe4d7eb-118a-4d15-b789-a18d9af6ff22';
 const TGTUUID = 'dbe4d7eb-118a-4d15-b789-a18d9af6ff29';
 
+const sleep = require('sleep-promise');
+
 // backend file for aio bdev
 const aioFile = '/tmp/aio-backend';
 // backend file for io_uring bdev
@@ -200,7 +202,7 @@ const doUring = (function () {
 
 describe('nexus', function () {
   // TODO: use promisifyAll from grpc-promise to avoid these definitions
-  /*****
+
   const unpublish = (args) => {
     return new Promise((resolve, reject) => {
       client.unpublishNexus(args, (err, data) => {
@@ -218,7 +220,7 @@ describe('nexus', function () {
       });
     });
   };
-  *****/
+
   const destroyNexus = (args) => {
     return new Promise((resolve, reject) => {
       client.destroyNexus(args, (err, data) => {
@@ -758,7 +760,6 @@ describe('nexus', function () {
       });
     });
 
-    /*****
     it('should create, publish, un-publish and finally destroy the same NBD nexus', async () => {
       for (let i = 0; i < 10; i++) {
         await createNexus(createArgs);
@@ -767,6 +768,7 @@ describe('nexus', function () {
           share: enums.NEXUS_NBD
         });
         await unpublish({ uuid: UUID });
+        await sleep(100);
         await destroyNexus({ uuid: UUID });
       }
     });
@@ -779,6 +781,7 @@ describe('nexus', function () {
           share: enums.NEXUS_ISCSI
         });
         await unpublish({ uuid: UUID });
+        await sleep(100);
         await destroyNexus({ uuid: UUID });
       }
     });
@@ -798,6 +801,7 @@ describe('nexus', function () {
           uuid: UUID,
           share: enums.NEXUS_NBD
         });
+        await sleep(100);
         await destroyNexus({ uuid: UUID });
       }
     });
@@ -809,6 +813,7 @@ describe('nexus', function () {
           uuid: UUID,
           share: enums.NEXUS_ISCSI
         });
+        await sleep(100);
         await destroyNexus({ uuid: UUID });
       }
     });
@@ -820,7 +825,7 @@ describe('nexus', function () {
         done();
       });
     });
-    *****/
+
     it('should create and destroy without publish or un-publishing the same nexus', async () => {
       for (let i = 0; i < 10; i++) {
         await createNexus(createArgs);
