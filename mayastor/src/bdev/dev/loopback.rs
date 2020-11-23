@@ -5,7 +5,7 @@ use snafu::ResultExt;
 use url::Url;
 
 use crate::{
-    bdev::{util::uri, CreateDestroy, GetName},
+    bdev::{nexus::instances, util::uri, CreateDestroy, GetName},
     core::Bdev,
     nexus_uri::{self, NexusBdevError},
 };
@@ -78,6 +78,19 @@ impl CreateDestroy for Loopback {
     }
 
     async fn destroy(self: Box<Self>) -> Result<(), Self::Error> {
+        instances().iter_mut().for_each(|n| {
+            n.children
+                .iter_mut()
+                .filter(|c| {
+                    c.bdev.is_some()
+                        && c.bdev.as_ref().unwrap().name() == self.name
+                })
+                .for_each(|c| {
+                    // This is a loopback (local) device, so although we call
+                    // remove, the underlying bdev is not destroyed.
+                    c.remove();
+                })
+        });
         Ok(())
     }
 }

@@ -336,26 +336,25 @@ impl NexusChild {
     /// Close the nexus child.
     pub(crate) async fn close(&mut self) -> Result<(), NexusBdevError> {
         info!("Closing child {}", self.name);
-        if self.desc.is_some() && self.bdev.is_some() {
-            self.desc.as_ref().unwrap().unclaim();
+        match &self.bdev {
+            Some(_) => {
+                if self.desc.is_some() {
+                    self.desc.as_ref().unwrap().unclaim();
+                }
+                // Destruction raises an SPDK_BDEV_EVENT_REMOVE event.
+                let result = self.destroy().await;
+                if self.state.load() != ChildState::Init {
+                    // If a child is still initialising it will not have an
+                    // underlying bdev, so don't wait for bdev
+                    // removal.
+                    self.remove_channel.1.next().await;
+                }
+                info!("Child {} closed", self.name);
+                result
+            }
+            // If None, the child was previously closed.
+            None => Ok(()),
         }
-
-        // Check if the child is local before calling destroy() as this will
-        // invalidate the bdev (i.e. set the bdev to None).
-        let local_child = self.is_local().unwrap_or_else(|| true);
-
-        // Destruction raises an SPDK_BDEV_EVENT_REMOVE event.
-        let result = self.destroy().await;
-
-        // If a child is initialising or local to the nexus, the remove()
-        // callback is not called, so don't wait on the remove event as it will
-        // never be raised.
-        if self.state.load() != ChildState::Init && !local_child {
-            self.remove_channel.1.next().await;
-        }
-
-        info!("Child {} closed", self.name);
-        result
     }
 
     /// Called in response to a SPDK_BDEV_EVENT_REMOVE event.
