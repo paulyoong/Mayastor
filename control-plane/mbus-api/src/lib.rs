@@ -3,6 +3,23 @@
 //! plane services and mayastor
 //! We could split these out further into categories when they start to grow
 
+use std::{fmt::Debug, marker::PhantomData, str::FromStr, time::Duration};
+
+use async_trait::async_trait;
+use dyn_clonable::clonable;
+use serde::{Deserialize, Serialize};
+use smol::io;
+use snafu::{ResultExt, Snafu};
+
+pub use mbus_nats::{
+    bus,
+    message_bus_init,
+    message_bus_init_options,
+    message_bus_init_tokio,
+};
+pub use receive::*;
+pub use send::*;
+
 mod mbus_nats;
 /// Message bus client interface
 pub mod message_bus;
@@ -12,21 +29,6 @@ pub mod receive;
 pub mod send;
 /// Version 0 of the messages
 pub mod v0;
-
-use async_trait::async_trait;
-use dyn_clonable::clonable;
-pub use mbus_nats::{
-    bus,
-    message_bus_init,
-    message_bus_init_options,
-    message_bus_init_tokio,
-};
-pub use receive::*;
-pub use send::*;
-use serde::{Deserialize, Serialize};
-use smol::io;
-use snafu::{ResultExt, Snafu};
-use std::{fmt::Debug, marker::PhantomData, str::FromStr, time::Duration};
 
 /// Result wrapper for send/receive
 pub type BusResult<T> = Result<T, Error>;

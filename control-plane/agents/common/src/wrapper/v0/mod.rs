@@ -2,20 +2,6 @@
 //! mayastor instances via gRPC and with the other services via the
 //! message bus.
 
-mod registry;
-
-pub use pool::NodeWrapperPool;
-pub use registry::Registry;
-pub use volume::NodeWrapperVolume;
-
-use async_trait::async_trait;
-use dyn_clonable::clonable;
-use mbus_api::{
-    message_bus::v0::{BusError, MessageBus, MessageBusTrait},
-    v0::*,
-};
-use rpc::mayastor::{mayastor_client::MayastorClient, Null};
-use snafu::{ResultExt, Snafu};
 use std::{
     cmp::Ordering,
     collections::HashMap,
@@ -24,8 +10,23 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+
+use async_trait::async_trait;
+use dyn_clonable::clonable;
+use snafu::{ResultExt, Snafu};
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
+
+use mbus_api::{
+    message_bus::v0::{BusError, MessageBus, MessageBusTrait},
+    v0::*,
+};
+pub use pool::NodeWrapperPool;
+pub use registry::Registry;
+use rpc::mayastor::{mayastor_client::MayastorClient, Null};
+pub use volume::NodeWrapperVolume;
+
+mod registry;
 
 /// Common error type for send/receive
 #[derive(Debug, Snafu)]
