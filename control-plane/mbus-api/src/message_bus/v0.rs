@@ -260,7 +260,7 @@ pub trait MessageBusTrait: Sized {
     /// List block devices on a node
     #[tracing::instrument(level = "debug", err)]
     async fn list_block_devices(
-        request: ListBlockDevices,
+        request: GetBlockDevices,
     ) -> BusResult<BlockDevices> {
         Ok(request.request().await?)
     }
