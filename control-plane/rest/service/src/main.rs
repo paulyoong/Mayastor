@@ -1,5 +1,8 @@
+mod authentication;
 mod v0;
 
+#[macro_use]
+extern crate lazy_static;
 use actix_service::ServiceFactory;
 use actix_web::{
     dev::{MessageBody, ServiceRequest, ServiceResponse},
@@ -7,6 +10,9 @@ use actix_web::{
     App,
     HttpServer,
 };
+
+use actix_web_httpauth::middleware::HttpAuthentication;
+
 use rustls::{
     internal::pemfile::{certs, rsa_private_keys},
     NoClientAuth,
@@ -47,6 +53,10 @@ pub(crate) struct CliArgs {
     /// Trace rest requests to the Jaeger endpoint agent
     #[structopt(long, short)]
     jaeger: Option<String>,
+
+    /// JSON Web Token for client authorisation
+    #[structopt(long)]
+    jwt: Option<String>,
 }
 
 fn parse_dir(src: &str) -> anyhow::Result<std::path::PathBuf> {
@@ -171,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
         App::new()
             .wrap(RequestTracing::new())
             .wrap(middleware::Logger::default())
+            .wrap(HttpAuthentication::bearer(authentication::authenticate))
             .configure_api(&v0::configure_api)
     };
 
