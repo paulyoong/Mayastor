@@ -3,17 +3,22 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 use jsonwebtoken::{crypto::verify, Algorithm, DecodingKey};
 use std::str::FromStr;
 
-lazy_static! {
-    static ref JWK: JsonWebKey = JsonWebKey {
-        jwk: load_jwk(),
-    };
+use once_cell::sync::OnceCell;
+use std::fs::File;
+
+static JWK: OnceCell<JsonWebKey> = OnceCell::new();
+
+/// Initialise JWK with the contents of the file at 'jwk_path'.
+pub fn init(jwk_path: &str) {
+    JWK.set(JsonWebKey {
+        jwk: serde_json::from_reader(File::open(jwk_path).unwrap()).unwrap(),
+    })
+    .ok()
+    .expect("Should only be initialised once");
 }
 
-// Currently load JWK from a test file.
-fn load_jwk() -> serde_json::Value {
-    let jwk = std::fs::read_to_string("control-plane/rest/jwt/jwk")
-        .expect("Failed to read jwk");
-    serde_json::from_str(&jwk).unwrap()
+fn jwk() -> &'static JsonWebKey {
+    JWK.get().expect("Failed to get JsonWebKey")
 }
 
 struct JsonWebKey {
@@ -42,7 +47,9 @@ impl JsonWebKey {
     }
 }
 
-// Validate that the signature of the token is valid.
+/// Authenticate the token signature.
+/// The signature is recomputed from the message and compared with the existing
+/// token signature.
 pub async fn authenticate(
     req: ServiceRequest,
     credentials: BearerAuth,
@@ -52,8 +59,8 @@ pub async fn authenticate(
     return match verify(
         &signature,
         &message,
-        &JWK.decoding_key(),
-        JWK.algorithm(),
+        &jwk().decoding_key(),
+        jwk().algorithm(),
     ) {
         Ok(true) => Ok(req),
         Ok(false) => {
@@ -75,9 +82,9 @@ pub async fn authenticate(
 //
 // JWT format:
 //      <header>.<payload>.<signature>
-//      \______  ________/ \___  ___/
-//             \/              \/
-//           message        signature
+//      \______  ________/
+//             \/
+//           message
 fn split_token(token: &str) -> (String, String) {
     let elems = token.split('.').collect::<Vec<&str>>();
     let message = format!("{}.{}", elems[0], elems[1]);

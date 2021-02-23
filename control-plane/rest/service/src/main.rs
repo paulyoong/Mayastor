@@ -1,8 +1,6 @@
 mod authentication;
 mod v0;
 
-#[macro_use]
-extern crate lazy_static;
 use actix_service::ServiceFactory;
 use actix_web::{
     dev::{MessageBody, ServiceRequest, ServiceResponse},
@@ -54,9 +52,13 @@ pub(crate) struct CliArgs {
     #[structopt(long, short)]
     jaeger: Option<String>,
 
-    /// JSON Web Token for client authorisation
+    /// Path to JSON Web KEY file used for client authentication
     #[structopt(long)]
-    jwt: Option<String>,
+    jwk: Option<String>,
+
+    /// Use dummy JSON Web Key (for testing)
+    #[structopt(long, required_unless = "jwk")]
+    dummy_jwk: bool,
 }
 
 fn parse_dir(src: &str) -> anyhow::Result<std::path::PathBuf> {
@@ -172,6 +174,13 @@ fn load_certificates<R: std::io::Read>(
     Ok(config)
 }
 
+fn get_jwk_path() -> String {
+    match CliArgs::from_args().dummy_jwk {
+        true => "control-plane/rest/jwk/jwk".into(),
+        false => CliArgs::from_args().jwk.unwrap(),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     // need to keep the jaeger pipeline tracer alive, if enabled
@@ -191,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     } else {
         mbus_api::message_bus_init(CliArgs::from_args().nats).await;
+        authentication::init(&get_jwk_path());
         let server = HttpServer::new(app)
             .bind_rustls(CliArgs::from_args().https, get_certificates()?)?;
         if let Some(http) = CliArgs::from_args().http {
