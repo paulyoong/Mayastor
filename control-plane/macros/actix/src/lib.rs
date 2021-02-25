@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
+use std::str::FromStr;
 use syn::{parse_macro_input, ItemFn};
 
 macro_rules! doc_comment {
@@ -57,6 +58,11 @@ impl Method {
         let handler: ItemFn = syn::parse(item)?;
         Ok(handler.sig.ident)
     }
+    fn secure_handler_fn(item: TokenStream) -> TokenStream {
+        let str_item = item.to_string();
+        let new_item = str_item.replace(") ->", "_token: AccessToken, ) ->");
+        TokenStream::from_str(&new_item).unwrap()
+    }
     fn generate(
         &self,
         attr: TokenStream,
@@ -65,7 +71,8 @@ impl Method {
         let full_uri: TokenStream2 = Self::handler_uri(attr.clone()).into();
         let relative_uri: TokenStream2 = Self::openapi_uri(attr.clone()).into();
         let handler_name = Self::handler_name(item.clone())?;
-        let handler_fn: TokenStream2 = item.into();
+        //let handler_fn: TokenStream2 = item.into();
+        let handler_fn: TokenStream2 = Self::secure_handler_fn(item).into();
         let method: TokenStream2 = self.method().parse()?;
         let variant: TokenStream2 = self.variant().parse()?;
         let handler_name_str = handler_name.to_string();
