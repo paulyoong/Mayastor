@@ -1,31 +1,47 @@
-use actix_web::{dev::ServiceRequest, Error};
-use actix_web_httpauth::extractors::bearer::BearerAuth;
-use jsonwebtoken::{crypto::verify, Algorithm, DecodingKey};
+use actix_web::{Error, HttpRequest};
+use jsonwebtoken::{crypto, Algorithm, DecodingKey};
 use std::str::FromStr;
 
+use actix_web::http::header::Header;
+use actix_web_httpauth::headers::authorization;
 use once_cell::sync::OnceCell;
 use std::fs::File;
-
 static JWK: OnceCell<JsonWebKey> = OnceCell::new();
 
 /// Initialise JWK with the contents of the file at 'jwk_path'.
-pub fn init(jwk_path: &str) {
-    JWK.set(JsonWebKey {
-        jwk: serde_json::from_reader(File::open(jwk_path).unwrap()).unwrap(),
-    })
-    .ok()
-    .expect("Should only be initialised once");
+/// If jwk_path is 'None', authentication is disabled.
+pub fn init(jwk_path: Option<String>) {
+    let jwk = match jwk_path {
+        Some(path) => {
+            let jwk_file = File::open(path).expect("Failed to open JWK file");
+            let jwk = serde_json::from_reader(jwk_file)
+                .expect("Failed to deserialise JWK");
+            JsonWebKey {
+                jwk,
+            }
+        }
+        None => JsonWebKey {
+            ..Default::default()
+        },
+    };
+    JWK.set(jwk).expect("Failed to set JWK");
 }
 
 fn jwk() -> &'static JsonWebKey {
-    JWK.get().expect("Failed to get JsonWebKey")
+    JWK.get().expect("Failed to get JWK")
 }
 
+#[derive(Default, Debug)]
 struct JsonWebKey {
     jwk: serde_json::Value,
 }
 
 impl JsonWebKey {
+    // Returns true if REST calls should be authenticated.
+    fn auth_enabled(&self) -> bool {
+        !self.jwk.is_null()
+    }
+
     // Return the algorithm.
     fn algorithm(&self) -> Algorithm {
         Algorithm::from_str(self.jwk["alg"].as_str().unwrap()).unwrap()
@@ -47,22 +63,35 @@ impl JsonWebKey {
     }
 }
 
-/// Authenticate the token signature.
-/// The signature is recomputed from the message and compared with the existing
-/// token signature.
-pub async fn authenticate(
-    req: ServiceRequest,
-    credentials: BearerAuth,
-) -> Result<ServiceRequest, Error> {
-    let token = credentials.token();
+/// Authenticate the HTTP request by checking the authorisation token to ensure
+/// the sender is who they claim to be.
+pub fn authenticate(req: &HttpRequest) -> Result<(), Error> {
+    // If authentication is disabled there is nothing to do.
+    if !jwk().auth_enabled() {
+        return Ok(());
+    }
+
+    // Check the request for a bearer token.
+    // An error is returned if the bearer token cannot be found.
+    match authorization::Authorization::<authorization::Bearer>::parse(req) {
+        Ok(bearer_auth) => validate(bearer_auth.into_scheme().token()),
+        Err(_) => {
+            tracing::error!("Missing bearer token in HTTP request.");
+            Err(Error::from(actix_web::HttpResponse::Unauthorized()))
+        }
+    }
+}
+
+/// Validate a bearer token.
+pub fn validate(token: &str) -> Result<(), Error> {
     let (message, signature) = split_token(&token);
-    return match verify(
+    return match crypto::verify(
         &signature,
         &message,
         &jwk().decoding_key(),
         jwk().algorithm(),
     ) {
-        Ok(true) => Ok(req),
+        Ok(true) => Ok(()),
         Ok(false) => {
             tracing::error!("Signature verification failed.");
             Err(Error::from(actix_web::HttpResponse::Unauthorized()))

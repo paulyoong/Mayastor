@@ -11,7 +11,7 @@ To try out the dummy JSON Web Key (JWK), execute the following steps from within
 ```
 2. Start the REST service within the nix-shell
 ```bash
-./target/debug/rest --dummy-jwk --dummy-certificates
+./target/debug/rest --dummy-certificates --jwk "../Mayastor/control-plane/rest/jwk/jwk"
 ```
 2. Set the token value
 ```bash

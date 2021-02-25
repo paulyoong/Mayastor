@@ -9,8 +9,6 @@ use actix_web::{
     HttpServer,
 };
 
-use actix_web_httpauth::middleware::HttpAuthentication;
-
 use rustls::{
     internal::pemfile::{certs, rsa_private_keys},
     NoClientAuth,
@@ -52,13 +50,13 @@ pub(crate) struct CliArgs {
     #[structopt(long, short)]
     jaeger: Option<String>,
 
-    /// Path to JSON Web KEY file used for client authentication
-    #[structopt(long)]
+    /// Path to JSON Web KEY file used for authenticating REST requests
+    #[structopt(long, required_unless = "no-auth")]
     jwk: Option<String>,
 
-    /// Use dummy JSON Web Key (for testing)
+    /// Don't authenticate REST requests
     #[structopt(long, required_unless = "jwk")]
-    dummy_jwk: bool,
+    no_auth: bool,
 }
 
 fn parse_dir(src: &str) -> anyhow::Result<std::path::PathBuf> {
@@ -174,10 +172,13 @@ fn load_certificates<R: std::io::Read>(
     Ok(config)
 }
 
-fn get_jwk_path() -> String {
-    match CliArgs::from_args().dummy_jwk {
-        true => "control-plane/rest/jwk/jwk".into(),
-        false => CliArgs::from_args().jwk.unwrap(),
+fn get_jwk_path() -> Option<String> {
+    match CliArgs::from_args().jwk {
+        Some(path) => Some(path),
+        None => match CliArgs::from_args().no_auth {
+            true => None,
+            false => panic!(""),
+        },
     }
 }
 
@@ -190,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
         App::new()
             .wrap(RequestTracing::new())
             .wrap(middleware::Logger::default())
-            .wrap(HttpAuthentication::bearer(authentication::authenticate))
+            //.wrap(HttpAuthentication::bearer(authentication::authenticate))
             .configure_api(&v0::configure_api)
     };
 
@@ -200,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     } else {
         mbus_api::message_bus_init(CliArgs::from_args().nats).await;
-        authentication::init(&get_jwk_path());
+        authentication::init(get_jwk_path());
         let server = HttpServer::new(app)
             .bind_rustls(CliArgs::from_args().https, get_certificates()?)?;
         if let Some(http) = CliArgs::from_args().http {
