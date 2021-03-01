@@ -1,7 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
-use std::str::FromStr;
 use syn::{parse_macro_input, ItemFn};
 
 macro_rules! doc_comment {
@@ -58,10 +57,16 @@ impl Method {
         let handler: ItemFn = syn::parse(item)?;
         Ok(handler.sig.ident)
     }
-    fn secure_handler_fn(item: TokenStream) -> TokenStream {
-        let str_item = item.to_string();
-        let new_item = str_item.replace(") ->", "_token: AccessToken, ) ->");
-        TokenStream::from_str(&new_item).unwrap()
+    /// Add authorisation to handler functions by adding a BearerToken as an
+    /// additional function argument.
+    /// The BearerToken is defined in
+    /// ../Mayastor/control-plane/rest/service/src/v0/mod.rs
+    fn handler_fn_with_auth(item: TokenStream) -> TokenStream2 {
+        let mut func: ItemFn = syn::parse(item).expect("Failed to parse item");
+        let new_input = syn::parse_str("_token: BearerToken")
+            .expect("Failed to parse bearer token");
+        func.sig.inputs.push(new_input);
+        func.to_token_stream()
     }
     fn generate(
         &self,
@@ -71,8 +76,7 @@ impl Method {
         let full_uri: TokenStream2 = Self::handler_uri(attr.clone()).into();
         let relative_uri: TokenStream2 = Self::openapi_uri(attr.clone()).into();
         let handler_name = Self::handler_name(item.clone())?;
-        //let handler_fn: TokenStream2 = item.into();
-        let handler_fn: TokenStream2 = Self::secure_handler_fn(item).into();
+        let handler_fn: TokenStream2 = Self::handler_fn_with_auth(item);
         let method: TokenStream2 = self.method().parse()?;
         let variant: TokenStream2 = self.variant().parse()?;
         let handler_name_str = handler_name.to_string();

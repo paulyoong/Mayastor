@@ -100,9 +100,9 @@ where
     name = "Authorization",
     description = "Use format 'Bearer TOKEN'"
 )]
-pub struct AccessToken;
+pub struct BearerToken;
 
-impl FromRequest for AccessToken {
+impl FromRequest for BearerToken {
     type Error = Error;
     type Future = Ready<Result<Self, Self::Error>>;
     type Config = ();
