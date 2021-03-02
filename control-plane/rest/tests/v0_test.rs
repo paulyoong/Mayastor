@@ -6,6 +6,7 @@ use mbus_api::{
 use opentelemetry::{global, sdk::propagation::TraceContextPropagator};
 use rest_client::{versions::v0::*, ActixRestClient};
 use rpc::mayastor::Null;
+use std::fs;
 use tracing::info;
 
 async fn wait_for_services() {
@@ -15,30 +16,29 @@ async fn wait_for_services() {
     Liveness {}.request_on(ChannelVs::JsonGrpc).await.unwrap();
 }
 
-// to avoid waiting for timeouts
-async fn orderly_start(test: &ComposeTest) {
-    test.start_containers(vec![
-        "nats", "node", "pool", "volume", "jsongrpc", "rest", "jaeger",
-    ])
-    .await
-    .unwrap();
-
-    test.connect_to_bus("nats").await;
-    wait_for_services().await;
-
-    test.start("mayastor").await.unwrap();
-
-    let mut hdl = test.grpc_handle("mayastor").await.unwrap();
-    hdl.mayastor.list_nexus(Null {}).await.unwrap();
+// Returns the path to the JWK file.
+fn jwk_file() -> String {
+    let jwk_file = std::env::current_dir()
+        .unwrap()
+        .join("authentication")
+        .join("jwk");
+    jwk_file.to_str().unwrap().into()
 }
 
-#[actix_rt::test]
-async fn client() {
+// Setup the infrastructure ready for the tests.
+async fn test_setup(auth: &bool) -> (String, ComposeTest) {
     global::set_text_map_propagator(TraceContextPropagator::new());
     let (_tracer, _uninstall) = opentelemetry_jaeger::new_pipeline()
         .with_service_name("rest-client")
         .install()
         .unwrap();
+
+    let jwk_file = jwk_file();
+    let mut rest_args = match auth {
+        true => vec!["--jwk", &jwk_file],
+        false => vec!["--no-auth"],
+    };
+    rest_args.append(&mut vec!["-j", "10.1.0.8:6831", "--dummy-certificates"]);
 
     let mayastor = "node-test-name";
     let test = Builder::new()
@@ -56,11 +56,9 @@ async fn client() {
         .add_container_spec(
             ContainerSpec::from_binary(
                 "rest",
-                Binary::from_dbg("rest").with_nats("-n").with_args(vec![
-                    "-j",
-                    "10.1.0.8:6831",
-                    "--dummy-certificates",
-                ]),
+                Binary::from_dbg("rest")
+                    .with_nats("-n")
+                    .with_args(rest_args),
             )
             .with_portmap("8080", "8080")
             .with_portmap("8081", "8081"),
@@ -90,16 +88,57 @@ async fn client() {
         .build()
         .await
         .unwrap();
-
-    client_test(&mayastor.into(), &test).await;
+    (mayastor.into(), test)
 }
 
-async fn client_test(mayastor: &NodeId, test: &ComposeTest) {
+// to avoid waiting for timeouts
+async fn orderly_start(test: &ComposeTest) {
+    test.start_containers(vec![
+        "nats", "node", "pool", "volume", "jsongrpc", "rest", "jaeger",
+    ])
+    .await
+    .unwrap();
+
+    test.connect_to_bus("nats").await;
+    wait_for_services().await;
+
+    test.start("mayastor").await.unwrap();
+
+    let mut hdl = test.grpc_handle("mayastor").await.unwrap();
+    hdl.mayastor.list_nexus(Null {}).await.unwrap();
+}
+
+// Return a bearer token to be sent with REST requests.
+fn bearer_token() -> String {
+    let token_file = std::env::current_dir()
+        .expect("Failed to get current directory")
+        .join("authentication")
+        .join("token");
+    fs::read_to_string(token_file).expect("Failed to get bearer token")
+}
+
+#[actix_rt::test]
+async fn client() {
+    // Run the client test both with and without authentication.
+    for auth in &[true, false] {
+        let (mayastor, test) = test_setup(auth).await;
+        client_test(&mayastor.into(), &test, auth).await;
+    }
+}
+
+async fn client_test(mayastor: &NodeId, test: &ComposeTest, auth: &bool) {
     orderly_start(&test).await;
 
-    let client = ActixRestClient::new("https://localhost:8080", true)
-        .unwrap()
-        .v0();
+    let client = ActixRestClient::new(
+        "https://localhost:8080",
+        true,
+        match auth {
+            true => Some(bearer_token()),
+            false => None,
+        },
+    )
+    .unwrap()
+    .v0();
     let nodes = client.get_nodes().await.unwrap();
     assert_eq!(nodes.len(), 1);
     assert_eq!(
