@@ -30,6 +30,7 @@ use crate::{
         Reactors,
     },
     nexus_uri::NexusBdevError,
+    persistent_store::PersistentStore,
     rebuild::{ClientOperations, RebuildJob},
 };
 
@@ -311,6 +312,9 @@ impl NexusChild {
             }
         }
         NexusChild::save_state_change();
+        PersistentStore::put(&self.guid, &self.state())
+            .await
+            .expect("Failed to set fault state in store");
     }
 
     /// Set the child as temporarily offline
@@ -324,6 +328,9 @@ impl NexusChild {
             );
         }
         NexusChild::save_state_change();
+        PersistentStore::put(&self.guid, &self.state())
+            .await
+            .expect("Failed to set offline state in store");
     }
 
     /// Get full name of this Nexus child.
@@ -369,6 +376,9 @@ impl NexusChild {
         let result = self.open(parent_size);
         self.set_state(ChildState::Faulted(Reason::OutOfSync));
         NexusChild::save_state_change();
+        PersistentStore::put(&self.guid, &self.state())
+            .await
+            .expect("Failed to set online state in store");
         result
     }
 
