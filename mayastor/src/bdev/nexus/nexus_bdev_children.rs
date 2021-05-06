@@ -50,6 +50,7 @@ use crate::{
     },
     core::DeviceEventType,
     nexus_uri::NexusBdevError,
+    persistent_store::PersistentStore,
 };
 
 impl Nexus {
@@ -261,11 +262,16 @@ impl Nexus {
             });
         }
 
-        self.children.remove(idx);
+        let removed_child = self.children.remove(idx);
         self.child_count -= 1;
 
         // Update child status to remove this child
         NexusChild::save_state_change();
+
+        // Remove child from the persistent store.
+        PersistentStore::delete(&removed_child.guid)
+            .await
+            .expect("Failed to remove child from store");
 
         self.start_rebuild_jobs(cancelled_rebuilding_children).await;
         Ok(())
@@ -339,6 +345,13 @@ impl Nexus {
                         _ => {
                             child.fault(reason).await;
                             NexusChild::save_state_change();
+
+                            // Mark the child as faulted in the persistent
+                            // store.
+                            PersistentStore::put(&child.guid, &child.state())
+                                .await
+                                .expect("Failed to set faulted state in store");
+
                             self.reconfigure(DrEvent::ChildFault).await;
                         }
                     }
