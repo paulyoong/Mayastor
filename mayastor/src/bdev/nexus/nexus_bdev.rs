@@ -40,6 +40,7 @@ use crate::{
     core::{Bdev, CoreError, IoType, Protocol, Reactor, Share},
     ffihelper::errno_result_from_i32,
     nexus_uri::{bdev_destroy, NexusBdevError},
+    persistent_store::PersistentStore,
     rebuild::RebuildError,
     subsys::{NvmfError, NvmfSubsystem},
 };
@@ -507,7 +508,29 @@ impl Nexus {
 
         self.try_open_children().await?;
         self.sync_labels().await?;
+        // Now that the labels are synchronised we can check the store and
+        // remove any unhealthy children.
+        self.remove_unhealthy_children().await;
         self.register().await
+    }
+
+    async fn remove_unhealthy_children(&mut self) {
+        let mut unhealthy_children = vec![];
+
+        for child in &self.children {
+            if let Ok(state) = PersistentStore::get(&child.guid).await {
+                let previous_state: ChildState =
+                    serde_json::from_value(state).unwrap();
+                if previous_state != ChildState::Open {
+                    unhealthy_children.push(child.name.clone());
+                }
+            }
+        }
+
+        for name in unhealthy_children {
+            warn!("Removing child {} from nexus {} because it was previously unhealthy", name, self.name);
+            self.children.retain(|c| c.name != name);
+        }
     }
 
     pub async fn sync_labels(&mut self) -> Result<(), Error> {
@@ -625,6 +648,13 @@ impl Nexus {
         if r.await.unwrap() {
             // Update the child states to remove them from the config file.
             NexusChild::save_state_change();
+            // // Remove children from the persistent store.
+            // for child in self.children.iter() {
+            //     PersistentStore::delete(&serde_json::json!(child.guid))
+            //         .await
+            //         .expect("Failed to delete entry from store");
+            // }
+
             Ok(())
         } else {
             Err(Error::NexusDestroy {

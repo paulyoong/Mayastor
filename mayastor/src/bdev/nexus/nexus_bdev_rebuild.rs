@@ -25,6 +25,7 @@ use crate::{
         VerboseError,
     },
     core::Reactors,
+    persistent_store::PersistentStore,
     rebuild::{
         ClientOperations,
         RebuildError,
@@ -262,6 +263,14 @@ impl Nexus {
             RebuildState::Completed => {
                 recovering_child.set_state(ChildState::Open);
                 NexusChild::save_state_change();
+
+                PersistentStore::put(
+                    &recovering_child.guid,
+                    &recovering_child.state(),
+                )
+                .await
+                .expect("Failed to set state of rebuilt child in store");
+
                 info!(
                     "Child {} has been rebuilt successfully",
                     recovering_child.get_name()

@@ -11,7 +11,10 @@ use mayastor::{
 use std::path::Path;
 use structopt::StructOpt;
 mayastor::CPS_INIT!();
-use mayastor::subsys::{message_bus_init, Registration};
+use mayastor::{
+    persistent_store::PersistentStore,
+    subsys::{message_bus_init, Registration},
+};
 
 fn start_tokio_runtime(args: &MayastorCliArgs) {
     let grpc_address = grpc::endpoint(args.grpc_endpoint.clone());
@@ -43,6 +46,7 @@ fn start_tokio_runtime(args: &MayastorCliArgs) {
             subsys::Registration::run().boxed_local(),
             grpc::MayastorGrpcServer::run(grpc_address, rpc_address)
                 .boxed_local(),
+            PersistentStore::run().boxed_local(),
         ];
 
         rt.block_on(futures::future::try_join_all(futures))
