@@ -1,8 +1,22 @@
+//! The persistent store is used to save information that is required by
+//! Mayastor across restarts.
+//!
+//! etcd is used as the backing store and is interfaced with through the use of
+//! the etcd-client crate. This crate has a dependency on the tokio async
+//! runtime, therefore store operations need to be dispatched to a tokio thread.
 use crate::{
     core::Reactors,
     store::{
         etcd::Etcd,
-        store_defs::{Store, StoreError, StoreKey, StoreValue},
+        store_defs::{
+            DeleteWait,
+            GetWait,
+            PutWait,
+            Store,
+            StoreError,
+            StoreKey,
+            StoreValue,
+        },
     },
 };
 use futures::{
@@ -11,6 +25,7 @@ use futures::{
 };
 use once_cell::sync::OnceCell;
 use serde_json::Value;
+use snafu::ResultExt;
 
 static ETCD_ENDPOINT: &str = "0.0.0.0:2379";
 static PERSISTENT_STORE: OnceCell<PersistentStore> = OnceCell::new();
@@ -45,7 +60,7 @@ impl PersistentStore {
         });
 
         // Run the work loop which executes store tasks.
-        PersistentStore::do_work(&mut receiver).await;
+        PersistentStore::work_loop(&mut receiver).await;
         Ok(())
     }
 
@@ -54,14 +69,18 @@ impl PersistentStore {
         key: &impl StoreKey,
         value: &impl StoreValue,
     ) -> Result<(), StoreError> {
-        tracing::warn!("Putting key {:?}, value {:?}", key, value);
+        let put_value = serde_json::to_value(value)
+            .expect("Failed to convert value to a serde_json value");
         let r = PersistentStore::dispatch_task(
             StoreOp::Put,
             key,
-            Some(serde_json::to_value(value).unwrap()),
+            Some(put_value.clone()),
         )
         .await;
-        let result = r.await.expect("Failed to wait for 'put' to complete");
+        let result = r.await.context(PutWait {
+            key: key.to_string(),
+            value: put_value,
+        })?;
         result.map(|_| ())
     }
 
@@ -69,7 +88,9 @@ impl PersistentStore {
     pub async fn get(key: &impl StoreKey) -> Result<Value, StoreError> {
         let r = PersistentStore::dispatch_task(StoreOp::Get, key, None).await;
         r.await
-            .expect("Failed to wait for 'get' to complete.")
+            .context(GetWait {
+                key: key.to_string(),
+            })?
             .map(|r| r.unwrap())
     }
 
@@ -78,7 +99,9 @@ impl PersistentStore {
         let r =
             PersistentStore::dispatch_task(StoreOp::Delete, key, None).await;
         r.await
-            .expect("Failed to wait for 'get' to complete.")
+            .context(DeleteWait {
+                key: key.to_string(),
+            })?
             .map(|_| ())
     }
 
@@ -103,6 +126,7 @@ impl PersistentStore {
         r
     }
 
+    /// Get an immutable reference to the store.
     fn store() -> &'static PersistentStore {
         PERSISTENT_STORE.get().unwrap()
     }
@@ -110,7 +134,7 @@ impl PersistentStore {
     /// Worker thread which executes the tasks sent to it.
     /// This MUST be executed on a tokio thread as that is what is required by
     /// the etcd-client crate.
-    async fn do_work(receiver: &mut Receiver<StoreTask>) {
+    async fn work_loop(receiver: &mut Receiver<StoreTask>) {
         loop {
             let task = receiver.next().await.unwrap();
             let mut store = PersistentStore::store().store.clone();
@@ -120,30 +144,41 @@ impl PersistentStore {
             // sending a future to our reactor as trying to send it directly
             // from the tokio thread doesn't work - the receiver side never
             // receives the message.
+            //
+            // If the task sender cannot be notified of completion, the error is
+            // logged and we continue to wait for the next task. We cannot do
+            // anything else here.
             match task.operation {
                 StoreOp::Put => {
                     let result = store.put_kv(&task.key, &task.value).await;
                     Reactors::master().send_future(async move {
-                        task.sender
-                            .send(result.map(|_| None))
-                            .expect("Failed to send 'put' result");
+                        if task.sender.send(result.map(|_| None)).is_err() {
+                            tracing::error!(
+                                "Failed to send completion for 'put' request."
+                            );
+                        }
                     });
                 }
                 StoreOp::Get => {
                     assert!(task.value.is_none());
                     let result = store.get_kv(&task.key).await;
                     Reactors::master().send_future(async move {
-                        task.sender
-                            .send(result.map(Some))
-                            .expect("Failed to send 'get' result");
+                        if task.sender.send(result.map(Some)).is_err() {
+                            tracing::error!(
+                                "Failed to send completion for 'get' request."
+                            );
+                        }
                     });
                 }
                 StoreOp::Delete => {
                     let result = store.delete_kv(&task.key).await;
                     Reactors::master().send_future(async move {
-                        task.sender
-                            .send(result.map(|_| None))
-                            .expect("Failed to send 'delete' result");
+                        if task.sender
+                            .send(result.map(|_| None)).is_err() {
+                            tracing::error!(
+                                "Failed to send completion for 'delete' request."
+                            );
+                        }
                     });
                 }
             }
