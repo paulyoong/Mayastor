@@ -25,6 +25,7 @@ fn start_tokio_runtime(args: &MayastorCliArgs) {
         .unwrap_or_else(|| "mayastor-node".into());
 
     let endpoint = args.mbus_endpoint.clone();
+    let persistent_store_endpoint = args.persistent_store_endpoint.clone();
 
     Mthread::spawn_unaffinitized(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -46,7 +47,7 @@ fn start_tokio_runtime(args: &MayastorCliArgs) {
             subsys::Registration::run().boxed_local(),
             grpc::MayastorGrpcServer::run(grpc_address, rpc_address)
                 .boxed_local(),
-            PersistentStore::run().boxed_local(),
+            PersistentStore::run(persistent_store_endpoint).boxed_local(),
         ];
 
         rt.block_on(futures::future::try_join_all(futures))
