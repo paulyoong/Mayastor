@@ -33,6 +33,7 @@ use crate::{
     persistent_store::PersistentStore,
     rebuild::{ClientOperations, RebuildJob},
 };
+use std::{thread::sleep, time::Duration};
 
 #[derive(Debug, Snafu)]
 pub enum ChildError {
@@ -312,9 +313,7 @@ impl NexusChild {
             }
         }
         NexusChild::save_state_change();
-        PersistentStore::put(&self.guid, &self.state())
-            .await
-            .expect("Failed to set fault state in store");
+        self.persist_state().await;
     }
 
     /// Set the child as temporarily offline
@@ -328,9 +327,7 @@ impl NexusChild {
             );
         }
         NexusChild::save_state_change();
-        PersistentStore::put(&self.guid, &self.state())
-            .await
-            .expect("Failed to set offline state in store");
+        self.persist_state().await;
     }
 
     /// Get full name of this Nexus child.
@@ -376,9 +373,7 @@ impl NexusChild {
         let result = self.open(parent_size);
         self.set_state(ChildState::Faulted(Reason::OutOfSync));
         NexusChild::save_state_change();
-        PersistentStore::put(&self.guid, &self.state())
-            .await
-            .expect("Failed to set online state in store");
+        self.persist_state().await;
         result
     }
 
@@ -386,6 +381,33 @@ impl NexusChild {
     pub(crate) fn save_state_change() {
         if ChildStatusConfig::save().is_err() {
             error!("Failed to save child status information");
+        }
+    }
+
+    /// Save the child state to a persistent store.
+    pub(crate) async fn persist_state(&self) {
+        // Storing the child state is integral to ensuring data consistency
+        // across restarts of Mayastor. Therefore, keep retrying until
+        // successful.
+        // TODO: Should we give up retrying eventually?
+        loop {
+            match PersistentStore::put(&self.name, &self.state()).await {
+                Ok(_) => {
+                    // The state was saved successfully.
+                    break;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to store state {} for child {} with error {}. Retrying...",
+                        self.state(),
+                        self.name,
+                        e
+                    );
+                    // Allow some time for the connection to the persistent
+                    // store to be re-established before retrying the operation.
+                    sleep(Duration::from_secs(1));
+                }
+            }
         }
     }
 
