@@ -10,7 +10,7 @@
 
 use crate::{
     bdev::{
-        nexus::{instances, nexus_bdev},
+        nexus::{instances, nexus_bdev, nexus_child::ChildState},
         nexus_create,
         Reason,
     },
@@ -28,6 +28,8 @@ use crate::{
     host::{blk_device, resource},
     lvs::{Error as LvsError, Lvol, Lvs},
     nexus_uri::NexusBdevError,
+    persistent_store::PersistentStore,
+    store::store_defs::StoreError,
 };
 use nix::errno::Errno;
 use rpc::mayastor::*;
@@ -381,7 +383,15 @@ impl mayastor_server::Mayastor for MayastorSvc {
         let rx = rpc_submit::<_, _, nexus_bdev::Error>(async move {
             let uuid = args.uuid.clone();
             let name = uuid_to_name(&args.uuid)?;
-            nexus_create(&name, args.size, Some(&args.uuid), &args.children)
+
+            // Check the state of the children before calling nexus_create.
+            // Only add children that are in the healthy state.
+            let healthy_children = get_healthy_children(&args.children).await;
+            if healthy_children.len() != args.children.len() {
+                warn!("Not all children are healthy.")
+            }
+
+            nexus_create(&name, args.size, Some(&args.uuid), &healthy_children)
                 .await?;
             let nexus = nexus_lookup(&uuid)?;
             info!("Created nexus {}", uuid);
@@ -802,4 +812,37 @@ impl mayastor_server::Mayastor for MayastorSvc {
         trace!("{:?}", reply);
         Ok(Response::new(reply))
     }
+}
+
+/// Check the persisted state of the passed in children and return a vector of
+/// healthy children.
+async fn get_healthy_children(children: &[String]) -> Vec<String> {
+    let mut healthy_children = vec![];
+    for child in children {
+        match PersistentStore::get(&child).await {
+            Ok(state) => {
+                // Child state entry found in store.
+                let persisted_state: ChildState =
+                    serde_json::from_value(state).unwrap();
+                if persisted_state == ChildState::Open {
+                    healthy_children.push(child.clone());
+                }
+            }
+            Err(e) => {
+                // If the child is not in the store, add it.
+                // Can a new child be added with existing children? If so, we
+                // cannot add it here!!!
+                if let StoreError::MissingEntry {
+                    ..
+                } = e
+                {
+                    PersistentStore::put(&child, &ChildState::Open)
+                        .await
+                        .expect("Failed to 'put' to store.");
+                    healthy_children.push(child.clone())
+                }
+            }
+        }
+    }
+    healthy_children
 }

@@ -269,7 +269,7 @@ impl Nexus {
         NexusChild::save_state_change();
 
         // Remove child from the persistent store.
-        PersistentStore::delete(&removed_child.guid)
+        PersistentStore::delete(&removed_child.name)
             .await
             .expect("Failed to remove child from store");
 
@@ -345,13 +345,7 @@ impl Nexus {
                         _ => {
                             child.fault(reason).await;
                             NexusChild::save_state_change();
-
-                            // Mark the child as faulted in the persistent
-                            // store.
-                            PersistentStore::put(&child.guid, &child.state())
-                                .await
-                                .expect("Failed to set faulted state in store");
-
+                            child.persist_state().await;
                             self.reconfigure(DrEvent::ChildFault).await;
                         }
                     }
