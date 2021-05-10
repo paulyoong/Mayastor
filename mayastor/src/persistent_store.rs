@@ -44,9 +44,9 @@ impl PersistentStore {
     /// Start the persistent store.
     /// This function must be called by the tokio runtime, because the work loop
     /// executes using the etcd-client which requires tokio.
-    pub async fn run() -> Result<(), ()> {
+    pub async fn run(endpoint: String) -> Result<(), ()> {
         // Create an instance of the backing store.
-        let etcd = Etcd::new(ETCD_ENDPOINT).await;
+        let etcd = Etcd::new(&endpoint).await;
         if etcd.is_err() {
             // If the store cannot be connected to, we cannot run.
             panic!("Failed to connect to etcd");
@@ -183,6 +183,11 @@ impl PersistentStore {
                 }
             }
         }
+    }
+
+    /// Returns the default etcd endpoint.
+    pub fn default_endpoint() -> String {
+        ETCD_ENDPOINT.to_string()
     }
 }
 
