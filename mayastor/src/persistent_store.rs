@@ -49,7 +49,7 @@ impl PersistentStore {
         let etcd = Etcd::new(&endpoint).await;
         if etcd.is_err() {
             // If the store cannot be connected to, we cannot run.
-            panic!("Failed to connect to etcd");
+            panic!("Failed to connect to etcd on endpoint {}", endpoint);
         }
 
         // Initialise the persistent store.
