@@ -18,6 +18,7 @@ static BDEVNAME2: &str = "aio:///tmp/disk2.img?blk_size=512";
 
 pub mod common;
 use common::MayastorTest;
+use composer::Builder;
 
 fn test_start() {
     common::delete_file(&[DISKNAME1.into(), DISKNAME2.into()]);
@@ -32,8 +33,17 @@ fn test_finish() {
 
 #[tokio::test]
 async fn add_child() {
+    // Start etcd container.
+    let _test = Builder::new()
+        .name("add_child")
+        .add_etcd_container()
+        .build()
+        .await
+        .unwrap();
+
     test_start();
     let ms = MayastorTest::new(MayastorCliArgs::default());
+
     // Create a nexus with a single child
     ms.spawn(async {
         let children = vec![BDEVNAME1.to_string()];

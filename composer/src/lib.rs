@@ -353,6 +353,8 @@ pub trait BuilderConfigure {
     ) -> Result<Builder, Box<dyn std::error::Error>>;
 }
 
+static ETCD_CONTAINER_NAME: &str = "etcd";
+
 impl Builder {
     /// construct a new builder for `[ComposeTest']
     pub fn new() -> Self {
@@ -424,11 +426,40 @@ impl Builder {
     }
 
     /// add a mayastor container with a name
-    pub fn add_container(mut self, name: &str) -> Builder {
-        self.containers.push(ContainerSpec::from_binary(
+    pub fn add_container(self, name: &str) -> Builder {
+        let etcd_endpoint = format!("http://etcd.{}:2379", self.name);
+        let mut etcd_self = self.add_etcd_container();
+        etcd_self.containers.push(ContainerSpec::from_binary(
             name,
-            Binary::from_dbg("mayastor"),
+            Binary::from_dbg("mayastor")
+                .with_args(vec!["-p".to_string(), etcd_endpoint]),
         ));
+        etcd_self
+    }
+
+    /// Add an etcd container if it isn't already included.
+    pub fn add_etcd_container(mut self) -> Builder {
+        if !self
+            .containers
+            .iter()
+            .any(|spec| spec.name == ETCD_CONTAINER_NAME)
+        {
+            self.containers.push(
+                ContainerSpec::from_binary(
+                    ETCD_CONTAINER_NAME,
+                    Binary::from_nix("etcd").with_args(vec![
+                        "--data-dir",
+                        "/tmp/etcd-data",
+                        "--advertise-client-urls",
+                        "http://0.0.0.0:2379",
+                        "--listen-client-urls",
+                        "http://0.0.0.0:2379",
+                    ]),
+                )
+                .with_portmap("2379", "2379")
+                .with_portmap("2380", "2380"),
+            );
+        }
         self
     }
 
@@ -1266,14 +1297,16 @@ impl ComposeTest {
     /// return grpc handles to the containers
     pub async fn grpc_handles(&self) -> Result<Vec<RpcHandle>, String> {
         let mut handles = Vec::new();
-        for v in &self.containers {
-            handles.push(
-                RpcHandle::connect(
-                    v.0.clone(),
-                    format!("{}:10124", v.1 .1).parse::<SocketAddr>().unwrap(),
-                )
-                .await?,
-            );
+        for (k, v) in &self.containers {
+            if k != ETCD_CONTAINER_NAME {
+                handles.push(
+                    RpcHandle::connect(
+                        v.0.clone(),
+                        format!("{}:10124", v.1).parse::<SocketAddr>().unwrap(),
+                    )
+                    .await?,
+                );
+            }
         }
 
         Ok(handles)

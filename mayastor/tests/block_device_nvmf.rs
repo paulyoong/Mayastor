@@ -112,6 +112,7 @@ async fn launch_instance() -> (ComposeTest, String) {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_create_destroy() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -152,6 +153,7 @@ async fn nvmf_device_create_destroy() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_identify_controller() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -173,6 +175,7 @@ async fn nvmf_device_identify_controller() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_events() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -290,6 +293,7 @@ fn check_io_stats(reads: u64, writes: u64) {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_io_stats() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -462,6 +466,7 @@ async fn nvmf_io_stats() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_read_write_at() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -533,6 +538,7 @@ async fn nvmf_device_read_write_at() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_readv_test() {
     const BUF_SIZE: u64 = 32768;
 
@@ -663,6 +669,7 @@ async fn nvmf_device_readv_test() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_writev_test() {
     const BUF_SIZE: u64 = 128 * 1024;
     const OP_OFFSET: u64 = 4 * 1024 * 1024;
@@ -825,6 +832,7 @@ async fn nvmf_device_writev_test() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_readv_iovs_test() {
     const OP_OFFSET: u64 = 6 * 1024 * 1024;
     const IOVCNT: usize = 5;
@@ -982,6 +990,7 @@ async fn nvmf_device_readv_iovs_test() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_writev_iovs_test() {
     const GUARD_SIZE: u64 = 32 * 1024;
     const OP_OFFSET: u64 = 10 * 1024 * 1024;
@@ -1177,6 +1186,7 @@ async fn nvmf_device_writev_iovs_test() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_admin_ctrl() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -1201,6 +1211,7 @@ async fn nvmf_device_admin_ctrl() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_reset() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -1475,16 +1486,19 @@ async fn wipe_device_blocks(is_unmap: bool) {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_unmap_blocks() {
     wipe_device_blocks(true).await;
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_write_zeroes() {
     wipe_device_blocks(false).await;
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_reset_abort_io() {
     const BUF_SIZE: u64 = 32768;
     const NUM_IOS: u64 = 4;
@@ -1705,6 +1719,7 @@ async fn nvmf_reset_abort_io() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_io_handle_cleanup() {
     let ms = get_ms();
     let (_test, url) = launch_instance().await;
@@ -1784,6 +1799,7 @@ async fn nvmf_device_io_handle_cleanup() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nvmf_device_hot_remove() {
     let ms = get_ms();
     let (test, url) = launch_instance().await;

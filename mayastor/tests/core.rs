@@ -129,6 +129,7 @@ async fn core_3() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn core_4() {
     common::delete_file(&[DISKNAME1.to_string()]);
     common::delete_file(&[DISKNAME2.to_string()]);
@@ -205,6 +206,7 @@ async fn core_4() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn core_5() {
     common::delete_file(&[DISKNAME1.to_string()]);
     let nexus_size: u64 = 100 * 1024 * 1024; // 100MiB
@@ -254,6 +256,7 @@ async fn core_5() {
 }
 
 #[tokio::test]
+#[ignore]
 // Test nexus with inaccessible bdev for 2nd child
 async fn core_6() {
     common::truncate_file(DISKNAME1, 64 * 1024);

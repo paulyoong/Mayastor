@@ -1,5 +1,5 @@
 use common::compose::Builder;
-use composer::{Binary, ComposeTest, ContainerSpec, RpcHandle};
+use composer::RpcHandle;
 use rpc::mayastor::{
     BdevShareRequest,
     BdevUri,
@@ -12,83 +12,21 @@ use rpc::mayastor::{
     NexusState,
     Null,
 };
-use std::{
-    io,
-    net::{SocketAddr, TcpStream},
-};
 
 pub mod common;
 
-async fn start_infrastructure(test_name: &str) -> ComposeTest {
-    let etcd_endpoint = format!("http://etcd.{}:2379", test_name);
+#[tokio::test]
+async fn nexus_create_test() {
     let test = Builder::new()
-        .name(test_name)
-        .add_container_spec(
-            ContainerSpec::from_binary(
-                "etcd",
-                Binary::from_nix("etcd").with_args(vec![
-                    "--data-dir",
-                    "/tmp/etcd-data",
-                    "--advertise-client-urls",
-                    "http://0.0.0.0:2379",
-                    "--listen-client-urls",
-                    "http://0.0.0.0:2379",
-                ]),
-            )
-            .with_portmap("2379", "2379")
-            .with_portmap("2380", "2380"),
-        )
-        .add_container_spec(ContainerSpec::from_binary(
-            "ms1",
-            Binary::from_dbg("mayastor").with_args(vec!["-p", &etcd_endpoint]),
-        ))
-        .add_container_spec(ContainerSpec::from_binary(
-            "ms2",
-            Binary::from_dbg("mayastor").with_args(vec!["-p", &etcd_endpoint]),
-        ))
-        .add_container_spec(ContainerSpec::from_binary(
-            "ms3",
-            Binary::from_dbg("mayastor").with_args(vec!["-p", &etcd_endpoint]),
-        ))
-        .add_container_spec(ContainerSpec::from_binary(
-            "ms4",
-            Binary::from_dbg("mayastor").with_args(vec!["-p", &etcd_endpoint]),
-        ))
+        .name("nexus_create_test")
+        .add_container("ms1")
+        .add_container("ms2")
+        .add_container("ms3")
+        .add_container("ms4")
         .with_clean(false)
-        .with_prune(true)
-        .autorun(false)
         .build()
         .await
         .unwrap();
-
-    orderly_start(&test).await;
-    test
-}
-
-async fn orderly_start(test: &ComposeTest) {
-    test.start("etcd").await.unwrap();
-    assert!(
-        wait_for_etcd_ready("0.0.0.0:2379").is_ok(),
-        "etcd not ready"
-    );
-
-    test.start("ms1").await.unwrap();
-    test.start("ms2").await.unwrap();
-    test.start("ms3").await.unwrap();
-    test.start("ms4").await.unwrap();
-}
-
-/// Wait to establish a connection to etcd.
-/// Returns 'Ok' if connected otherwise 'Err' is returned.
-fn wait_for_etcd_ready(endpoint: &str) -> io::Result<TcpStream> {
-    use std::{str::FromStr, time::Duration};
-    let sa = SocketAddr::from_str(endpoint).unwrap();
-    TcpStream::connect_timeout(&sa, Duration::from_secs(3))
-}
-
-#[tokio::test]
-async fn nexus_create_test() {
-    let test = start_infrastructure("nexus_create_test").await;
     let ms1 = &mut test.grpc_handle("ms1").await.unwrap();
     let ms2 = &mut test.grpc_handle("ms2").await.unwrap();
     let ms3 = &mut test.grpc_handle("ms3").await.unwrap();
@@ -115,7 +53,7 @@ async fn nexus_create_test() {
         NexusState::NexusOnline as i32
     );
 
-    // Check the state of the nexus and children are all healthy.
+    // Check the nexus and children are healthy.
 
     let nexus = get_nexus(ms1, nexus_uuid).await;
     assert_eq!(nexus.children.len(), 2);

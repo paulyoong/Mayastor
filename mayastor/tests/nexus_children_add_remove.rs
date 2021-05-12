@@ -10,6 +10,7 @@ static DISKNAME2: &str = "/tmp/disk2.img";
 static DISKNAME3: &str = "/tmp/disk3.img";
 
 use crate::common::MayastorTest;
+use composer::{Builder, ComposeTest};
 use mayastor::core::{MayastorCliArgs, Share};
 
 pub mod common;
@@ -27,11 +28,23 @@ pub fn mayastor() -> &'static MayastorTest<'static> {
     })
 }
 
+async fn start_etcd(test_name: &str) -> ComposeTest {
+    // Start etcd container.
+    Builder::new()
+        .name(&test_name)
+        .add_etcd_container()
+        .build()
+        .await
+        .unwrap()
+}
+
 /// create a nexus with two file based devices
 /// and then, once created, share it and then
 /// remove one of the children
 #[tokio::test]
+#[ignore]
 async fn remove_children_from_nexus() {
+    let _etcd = start_etcd("remove_children_from_nexus").await;
     // we can only start mayastor once we run it within the same process, and
     // during start mayastor will create a thread for each of the cores
     // (0x2) here.
@@ -92,6 +105,7 @@ async fn remove_children_from_nexus() {
 /// similar as the above test case however, instead of removal we add one
 #[tokio::test]
 async fn nexus_add_child() {
+    let _etcd = start_etcd("nexus_add_child").await;
     let ms = mayastor();
     // we can only start mayastor once
     common::truncate_file(DISKNAME1, 64 * 1024);

@@ -1,3 +1,4 @@
+use composer::Builder;
 use mayastor::{
     bdev::{nexus_create, nexus_lookup, Reason},
     core::MayastorCliArgs,
@@ -12,6 +13,14 @@ static CHILD_2: &str = "malloc:///malloc1?blk_size=512&size_mb=10";
 
 #[tokio::test]
 async fn fault_child() {
+    // Start etcd container.
+    let _test = Builder::new()
+        .name("add_child")
+        .add_etcd_container()
+        .build()
+        .await
+        .unwrap();
+
     let ms = common::MayastorTest::new(MayastorCliArgs::default());
     ms.spawn(async {
         nexus_create(NEXUS_NAME, NEXUS_SIZE, None, &[CHILD_1.to_string()])

@@ -5,6 +5,7 @@ use std::{
 
 use bincode::serialize_into;
 
+use composer::Builder;
 use mayastor::{
     bdev::{nexus_create, nexus_lookup, GptEntry, GptHeader},
     core::{
@@ -28,8 +29,17 @@ static DISKNAME2: &str = "/tmp/disk2.img";
 static BDEVNAME2: &str = "aio:///tmp/disk2.img?blk_size=512";
 pub mod common;
 
-#[test]
-fn read_label() {
+#[tokio::test]
+#[ignore]
+async fn read_label() {
+    // Start etcd container.
+    let _test = Builder::new()
+        .name("add_child")
+        .add_etcd_container()
+        .build()
+        .await
+        .unwrap();
+
     common::mayastor_test_init();
     let output = Command::new("truncate")
         .args(&["-s", "64m", DISKNAME1])

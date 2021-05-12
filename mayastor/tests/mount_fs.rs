@@ -11,6 +11,7 @@ use mayastor::{
 pub mod common;
 use common::compose::MayastorTest;
 
+use composer::{Builder, ComposeTest};
 use rpc::mayastor::ShareProtocolNexus;
 
 static DISKNAME1: &str = "/tmp/disk1.img";
@@ -33,6 +34,16 @@ fn get_ms() -> &'static MayastorTest<'static> {
     let instance =
         MAYASTOR.get_or_init(|| MayastorTest::new(MayastorCliArgs::default()));
     &instance
+}
+
+async fn start_etcd(test_name: &str) -> ComposeTest {
+    // Start etcd container.
+    Builder::new()
+        .name(&test_name)
+        .add_etcd_container()
+        .build()
+        .await
+        .unwrap()
 }
 
 async fn create_connected_nvmf_nexus(
@@ -120,6 +131,7 @@ async fn mount_test(ms: &'static MayastorTest<'static>, fstype: &str) {
 
 #[tokio::test]
 async fn mount_fs_mirror() {
+    let _etcd = start_etcd("mount_fs_mirror").await;
     let ms = get_ms();
 
     prepare_storage!();
@@ -130,6 +142,7 @@ async fn mount_fs_mirror() {
 
 #[tokio::test]
 async fn mount_fs_multiple() {
+    let _etcd = start_etcd("mount_fs_multiple").await;
     let ms = get_ms();
 
     prepare_storage!();
@@ -150,6 +163,7 @@ async fn mount_fs_multiple() {
 
 #[tokio::test]
 async fn mount_fn_fio() {
+    let _etcd = start_etcd("mount_fn_fio").await;
     let ms = get_ms();
 
     prepare_storage!();

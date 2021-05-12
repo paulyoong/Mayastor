@@ -24,6 +24,7 @@ pub mod compose;
 pub mod error_bdev;
 
 pub use compose::MayastorTest;
+use mayastor::persistent_store::PersistentStore;
 
 /// call F cnt times, and sleep for a duration between each invocation
 pub fn retry<F, T, E>(mut cnt: u32, timeout: Duration, mut f: F) -> T
@@ -126,15 +127,30 @@ pub fn mayastor_test_init() {
         })
     }
 
-    ["dd", "mkfs.xfs", "mkfs.ext4", "cmp", "fsck", "truncate"]
-        .iter()
-        .for_each(|binary| {
-            if binary_present(binary).is_err() {
-                panic!("binary: {} not present in path", binary);
-            }
-        });
+    [
+        "dd",
+        "mkfs.xfs",
+        "mkfs.ext4",
+        "cmp",
+        "fsck",
+        "truncate",
+        "etcd",
+    ]
+    .iter()
+    .for_each(|binary| {
+        if binary_present(binary).is_err() {
+            panic!("binary: {} not present in path", binary);
+        }
+    });
+    init_persistent_store();
     logger::init("info,mayastor=DEBUG");
     mayastor::CPS_INIT!();
+}
+
+fn init_persistent_store() {
+    tokio::spawn(async move {
+        PersistentStore::run(PersistentStore::default_endpoint()).await
+    });
 }
 
 pub fn dd_random_file(path: &str, bs: u32, size: u64) {

@@ -121,9 +121,9 @@ async fn unlock_range(
     nexus.unlock_lba_range(ctx, ch).await
 }
 
-#[test]
+#[tokio::test]
 // Test acquiring and releasing a lock.
-fn lock_unlock() {
+async fn lock_unlock() {
     test_ini();
     Reactor::block_on(async {
         let nexus = Bdev::open_by_name(NEXUS_NAME, true).unwrap();
@@ -141,9 +141,9 @@ fn lock_unlock() {
     test_fini();
 }
 
-#[test]
+#[tokio::test]
 // Test that an error is received when the lock/unlock contexts don't match
-fn lock_unlock_different_context() {
+async fn lock_unlock_different_context() {
     test_ini();
     Reactor::block_on(async {
         let nexus = Bdev::open_by_name(NEXUS_NAME, true).unwrap();
@@ -165,10 +165,10 @@ fn lock_unlock_different_context() {
     test_fini();
 }
 
-#[test]
+#[tokio::test]
 // Test taking out multiple locks on an overlapping block range.
 // The second lock should only succeeded after the first lock is released.
-fn multiple_locks() {
+async fn multiple_locks() {
     test_ini();
 
     let reactor = Reactors::current();
@@ -241,11 +241,11 @@ fn multiple_locks() {
     test_fini();
 }
 
-#[test]
+#[tokio::test]
 // Test locking a block range and then issuing a front-end I/O to an overlapping
 // range.
 // TODO: Add additional test for issuing front-end I/O then taking a lock
-fn lock_then_fe_io() {
+async fn lock_then_fe_io() {
     test_ini();
 
     let reactor = Reactors::current();

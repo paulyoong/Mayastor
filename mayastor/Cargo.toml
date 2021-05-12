@@ -113,3 +113,4 @@ assert_matches = "1.2"
 composer = { path = "../composer" }
 nvmeadm = {path = "../nvmeadm", version = "0.1.0"}
 run_script = "*"
+tokio = { version = "1", features = ["full"] }
