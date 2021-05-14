@@ -26,9 +26,10 @@ use futures::{
 use once_cell::sync::OnceCell;
 use serde_json::Value;
 use snafu::ResultExt;
+use std::{thread::sleep, time::Duration};
 
 static ETCD_ENDPOINT: &str = "0.0.0.0:2379";
-static PERSISTENT_STORE: OnceCell<PersistentStore> = OnceCell::new();
+static PERSISTENT_STORE: OnceCell<Option<PersistentStore>> = OnceCell::new();
 
 type TaskReceiver = oneshot::Receiver<Result<Option<Value>, StoreError>>;
 
@@ -44,24 +45,54 @@ impl PersistentStore {
     /// Start the persistent store.
     /// This function must be called by the tokio runtime, because the work loop
     /// executes using the etcd-client which requires tokio.
-    pub async fn run(endpoint: String) -> Result<(), ()> {
-        // Create an instance of the backing store.
-        let etcd = Etcd::new(&endpoint).await;
-        if etcd.is_err() {
-            // If the store cannot be connected to, we cannot run.
-            panic!("Failed to connect to etcd");
+    pub async fn run(endpoint: Option<String>) -> Result<(), ()> {
+        if endpoint.is_none() {
+            // No endpoint means no persistent store.
+            warn!("Persistent store not initialised");
+            PERSISTENT_STORE.get_or_init(|| None);
+            return Ok(());
         }
 
-        // Initialise the persistent store.
-        let (sender, mut receiver) = mpsc::channel::<StoreTask>(0);
-        PERSISTENT_STORE.get_or_init(|| PersistentStore {
-            store: etcd.unwrap(),
-            sender,
-        });
-
-        // Run the work loop which executes store tasks.
-        PersistentStore::work_loop(&mut receiver).await;
+        match PersistentStore::connect_to_backing_store(
+            &endpoint.clone().unwrap(),
+        )
+        .await
+        {
+            Some(etcd) => {
+                // Initialise the persistent store.
+                let (sender, mut receiver) = mpsc::channel::<StoreTask>(0);
+                PERSISTENT_STORE.get_or_init(|| {
+                    Some(PersistentStore {
+                        store: etcd,
+                        sender,
+                    })
+                });
+                // Run the work loop which executes store tasks.
+                PersistentStore::work_loop(&mut receiver).await;
+            }
+            None => {
+                // If the store cannot be connected to, we cannot run.
+                panic!(
+                    "Failed to connect to etcd on endpoint {}",
+                    endpoint.unwrap()
+                );
+            }
+        }
         Ok(())
+    }
+
+    async fn connect_to_backing_store(endpoint: &str) -> Option<Etcd> {
+        let mut retries = 3;
+        while retries > 0 {
+            match Etcd::new(endpoint).await {
+                Ok(store) => return Some(store),
+                Err(_) => {
+                    retries -= 1;
+                    sleep(Duration::from_secs(1));
+                }
+            }
+        }
+        None
     }
 
     /// Put a key-value in the store.
@@ -112,8 +143,11 @@ impl PersistentStore {
         key: &impl ToString,
         value: Option<Value>,
     ) -> TaskReceiver {
+        assert!(PersistentStore::store().is_some());
         let (s, r) = oneshot::channel::<Result<Option<Value>, StoreError>>();
         PersistentStore::store()
+            .as_ref()
+            .unwrap()
             .sender
             .clone()
             .start_send(StoreTask {
@@ -125,9 +159,13 @@ impl PersistentStore {
             .expect("Failed to dispatch work");
         r
     }
+    /// Determine if the persistent store has been enabled.
+    pub fn enabled() -> bool {
+        PERSISTENT_STORE.get().is_some()
+    }
 
     /// Get an immutable reference to the store.
-    fn store() -> &'static PersistentStore {
+    fn store() -> &'static Option<PersistentStore> {
         PERSISTENT_STORE.get().unwrap()
     }
 
@@ -135,9 +173,11 @@ impl PersistentStore {
     /// This MUST be executed on a tokio thread as that is what is required by
     /// the etcd-client crate.
     async fn work_loop(receiver: &mut Receiver<StoreTask>) {
+        assert!(PersistentStore::store().is_some());
         loop {
             let task = receiver.next().await.unwrap();
-            let mut store = PersistentStore::store().store.clone();
+            let mut store =
+                PersistentStore::store().as_ref().unwrap().store.clone();
 
             // Once an operation has been performed on the store, send the
             // result back on the provided channel. This has to be performed by

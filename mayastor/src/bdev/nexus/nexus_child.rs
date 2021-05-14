@@ -313,7 +313,6 @@ impl NexusChild {
             }
         }
         NexusChild::save_state_change();
-        self.persist_state().await;
     }
 
     /// Set the child as temporarily offline
@@ -327,7 +326,6 @@ impl NexusChild {
             );
         }
         NexusChild::save_state_change();
-        self.persist_state().await;
     }
 
     /// Get full name of this Nexus child.
@@ -373,7 +371,6 @@ impl NexusChild {
         let result = self.open(parent_size);
         self.set_state(ChildState::Faulted(Reason::OutOfSync));
         NexusChild::save_state_change();
-        self.persist_state().await;
         result
     }
 
@@ -386,6 +383,11 @@ impl NexusChild {
 
     /// Save the child state to a persistent store.
     pub(crate) async fn persist_state(&self) {
+        if !PersistentStore::enabled() {
+            // Can't persist the state because the store is not enabled.
+            return;
+        }
+
         // Storing the child state is integral to ensuring data consistency
         // across restarts of Mayastor. Therefore, keep retrying until
         // successful.

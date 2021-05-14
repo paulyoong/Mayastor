@@ -639,6 +639,8 @@ impl NexusBio {
                             nexus.set_failfast().await.unwrap();
                             nexus.reconfigure(DrEvent::ChildFault).await;
 
+                            child.persist_state().await;
+
                             // Lookup child once more and finally remove it.
                             match nexus.child_lookup(&device) {
                                 Some(child) => {
