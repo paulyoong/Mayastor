@@ -33,7 +33,8 @@ use crate::{
     persistent_store::PersistentStore,
     rebuild::{ClientOperations, RebuildJob},
 };
-use std::{thread::sleep, time::Duration};
+use std::{borrow::Cow, thread::sleep, time::Duration};
+use url::Url;
 
 #[derive(Debug, Snafu)]
 pub enum ChildError {
@@ -388,12 +389,23 @@ impl NexusChild {
             return;
         }
 
+        let child_uuid = match self.uuid() {
+            Some(uuid) => uuid,
+            None => {
+                // If we can't get a UUID of the child, we cannot persist its
+                // state, which is dangerous as it can lead to data corruption.
+                // We should never be able to reach this point as the UUID makes
+                // up the name of the child.
+                panic!("Failed to get UUID of child.")
+            }
+        };
+
         // Storing the child state is integral to ensuring data consistency
         // across restarts of Mayastor. Therefore, keep retrying until
         // successful.
         // TODO: Should we give up retrying eventually?
         loop {
-            match PersistentStore::put(&self.name, &self.state()).await {
+            match PersistentStore::put(&child_uuid, &self.state()).await {
                 Ok(_) => {
                     // The state was saved successfully.
                     break;
@@ -411,6 +423,21 @@ impl NexusChild {
                 }
             }
         }
+    }
+
+    /// Extract the child UUID from its name.
+    fn uuid(&self) -> Option<String> {
+        let url = Url::parse(&self.name).ok()?;
+        let uuids = url
+            .query_pairs()
+            .into_iter()
+            .filter(|q| q.0 == Cow::from("uuid"))
+            .collect::<Vec<(Cow<str>, Cow<str>)>>();
+        if uuids.is_empty() {
+            return None;
+        }
+        let uuid = Cow::to_string(&uuids.first()?.1);
+        Some(uuid)
     }
 
     /// returns the state of the child
