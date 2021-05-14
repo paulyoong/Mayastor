@@ -10,7 +10,7 @@
 
 use crate::{
     bdev::{
-        nexus::{instances, nexus_bdev, nexus_child::ChildState},
+        nexus::{instances, nexus_bdev},
         nexus_create,
         Reason,
     },
@@ -28,11 +28,10 @@ use crate::{
     host::{blk_device, resource},
     lvs::{Error as LvsError, Lvol, Lvs},
     nexus_uri::NexusBdevError,
-    persistent_store::PersistentStore,
 };
 use nix::errno::Errno;
 use rpc::mayastor::*;
-use std::{collections::HashMap, convert::TryFrom};
+use std::convert::TryFrom;
 use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
@@ -382,15 +381,7 @@ impl mayastor_server::Mayastor for MayastorSvc {
         let rx = rpc_submit::<_, _, nexus_bdev::Error>(async move {
             let uuid = args.uuid.clone();
             let name = uuid_to_name(&args.uuid)?;
-
-            // Check the state of the children before calling nexus_create.
-            // Only add children that are in the healthy state.
-            let healthy_children = get_healthy_children(&args.children).await;
-            if healthy_children.len() != args.children.len() {
-                warn!("Not all children are healthy.")
-            }
-
-            nexus_create(&name, args.size, Some(&args.uuid), &healthy_children)
+            nexus_create(&name, args.size, Some(&args.uuid), &args.children)
                 .await?;
             let nexus = nexus_lookup(&uuid)?;
             info!("Created nexus {}", uuid);
@@ -810,41 +801,5 @@ impl mayastor_server::Mayastor for MayastorSvc {
         };
         trace!("{:?}", reply);
         Ok(Response::new(reply))
-    }
-}
-
-/// Check the persisted state of the passed in children and return a vector of
-/// healthy children.
-async fn get_healthy_children(children: &[String]) -> Vec<String> {
-    // Lookup previous states of the children.
-    let mut persisted_states = HashMap::new();
-    for child in children {
-        if let Ok(state) = PersistentStore::get(&child).await {
-            persisted_states.insert(child, state);
-        }
-    }
-
-    if persisted_states.is_empty() {
-        // None of the children were found in the store, so they must be new.
-        // Add their states to the store, and return all of them.
-        let healthy_children = children.to_vec();
-        for child in &healthy_children {
-            PersistentStore::put(child, &ChildState::Open)
-                .await
-                .expect("Failed to 'put' to store.");
-        }
-        healthy_children
-    } else {
-        // At least some of the children were found in the store. Only the
-        // healthy children should be used by the nexus.
-        let mut healthy_children = vec![];
-        for (name, state) in persisted_states {
-            let persisted_state: ChildState = serde_json::from_value(state)
-                .expect("Failed to deserialise child state.");
-            if persisted_state == ChildState::Open {
-                healthy_children.push(name.clone());
-            }
-        }
-        healthy_children
     }
 }

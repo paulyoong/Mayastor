@@ -262,7 +262,6 @@ impl Nexus {
             RebuildState::Completed => {
                 recovering_child.set_state(ChildState::Open);
                 NexusChild::save_state_change();
-                recovering_child.persist_state().await;
                 info!(
                     "Child {} has been rebuilt successfully",
                     recovering_child.get_name()
