@@ -96,10 +96,10 @@ impl PersistentStore {
         let key_clone = key.to_string();
         let value_clone = put_value.clone();
         let rx = PersistentStore::execute_store_op(async move {
-            let mut store =
-                PersistentStore::store().as_ref().unwrap().store.clone();
-            let result = store.put_kv(&key_clone, &value_clone).await;
-            result.map(|_| None)
+            PersistentStore::store()
+                .put_kv(&key_clone, &value_clone)
+                .await
+                .map(|_| None)
         });
 
         let result = rx.await.context(PutWait {
@@ -113,10 +113,7 @@ impl PersistentStore {
     pub async fn get(key: &impl StoreKey) -> Result<Value, StoreError> {
         let key_clone = key.to_string();
         let rx = PersistentStore::execute_store_op(async move {
-            let mut store =
-                PersistentStore::store().as_ref().unwrap().store.clone();
-            let result = store.get_kv(&key_clone).await;
-            result.map(Some)
+            PersistentStore::store().get_kv(&key_clone).await.map(Some)
         });
         rx.await
             .context(GetWait {
@@ -129,10 +126,10 @@ impl PersistentStore {
     pub async fn delete(key: &impl StoreKey) -> Result<(), StoreError> {
         let key_clone = key.to_string();
         let rx = PersistentStore::execute_store_op(async move {
-            let mut store =
-                PersistentStore::store().as_ref().unwrap().store.clone();
-            let result = store.delete_kv(&key_clone).await;
-            result.map(|_| None)
+            PersistentStore::store()
+                .delete_kv(&key_clone)
+                .await
+                .map(|_| None)
         });
         rx.await
             .context(DeleteWait {
@@ -172,9 +169,15 @@ impl PersistentStore {
         PERSISTENT_STORE.get().is_some()
     }
 
-    /// Get an immutable reference to the store.
-    fn store() -> &'static Option<PersistentStore> {
-        PERSISTENT_STORE.get().unwrap()
+    /// Get an instance of the backing store.
+    fn store() -> Etcd {
+        PERSISTENT_STORE
+            .get()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .store
+            .clone()
     }
 
     /// Returns the default etcd endpoint.
