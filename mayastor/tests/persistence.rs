@@ -16,7 +16,8 @@ use rpc::mayastor::{
     PublishNexusRequest,
     ShareProtocolNexus,
 };
-use std::convert::TryFrom;
+use std::{borrow::Cow, convert::TryFrom};
+use url::Url;
 
 pub mod common;
 
@@ -86,13 +87,25 @@ async fn persist_child_state() {
 
     // Use etcd-client to get the value in the store.
     let mut etcd = Client::connect(["0.0.0.0:2379"], None).await.unwrap();
-    let response = etcd
-        .get(child2.clone(), None)
-        .await
-        .expect("No entry found");
+    let key = uuid_from_uri(&child2).expect("Failed to get uuid");
+    let response = etcd.get(key, None).await.expect("No entry found");
     let value = response.kvs().first().unwrap().value();
     let state: MayastorChildState = serde_json::from_slice(value).unwrap();
     assert_eq!(state, MayastorChildState::Faulted(Reason::IoError))
+}
+/// Extract the child UUID from its name.
+fn uuid_from_uri(uri: &str) -> Option<String> {
+    let url = Url::parse(uri).ok()?;
+    let uuids = url
+        .query_pairs()
+        .into_iter()
+        .filter(|q| q.0 == Cow::from("uuid"))
+        .collect::<Vec<(Cow<str>, Cow<str>)>>();
+    if uuids.is_empty() {
+        return None;
+    }
+    let uuid = Cow::to_string(&uuids.first()?.1);
+    Some(uuid)
 }
 
 async fn start_infrastructure(test_name: &str) -> (ComposeTest, String) {
