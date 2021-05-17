@@ -11,7 +11,7 @@ use rpc::persistence::{ChildInfo, NexusInfo};
 use std::{thread::sleep, time::Duration};
 
 pub(crate) enum PersistOp {
-    Init,
+    Create,
     Update,
     Shutdown,
 }
@@ -23,7 +23,7 @@ impl Nexus {
         }
         let mut persistent_info = self.persistent_info.lock().unwrap();
         match op {
-            PersistOp::Init => {
+            PersistOp::Create => {
                 // Initialisation of the persistent info will overwrite any
                 // existing entries.
                 // This should only be called on nexus creation.
@@ -67,8 +67,9 @@ impl Nexus {
     // until successful.
     // TODO: Should we give up retrying eventually?
     async fn save(&self, info: &NexusInfo) {
+        let nexus_uuid = self.name.strip_prefix("nexus-").unwrap_or(&self.name);
         loop {
-            match PersistentStore::put(&self.name, info).await {
+            match PersistentStore::put(&nexus_uuid, info).await {
                 Ok(_) => {
                     // The state was saved successfully.
                     break;
