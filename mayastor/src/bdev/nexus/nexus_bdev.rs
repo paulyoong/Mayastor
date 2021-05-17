@@ -36,6 +36,7 @@ use crate::{
             nexus_child::{ChildError, ChildState, NexusChild},
             nexus_label::LabelError,
             nexus_nbd::{NbdDisk, NbdError},
+            nexus_persistence::PersistOp,
         },
     },
     core::{Bdev, CoreError, Cores, IoType, Protocol, Reactor, Share},
@@ -1044,7 +1045,11 @@ pub async fn nexus_create(
             Err(error)
         }
 
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            // Persist the fact that the nexus is now successfully open.
+            ni.persist(PersistOp::Create).await;
+            Ok(())
+        }
     }
 }
 
