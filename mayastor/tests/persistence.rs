@@ -2,30 +2,203 @@ use crate::common::fio_run_verify;
 use common::compose::Builder;
 use composer::{Binary, ComposeTest, ContainerSpec, RpcHandle};
 use etcd_client::Client;
-use mayastor::bdev::{ChildState as MayastorChildState, Reason};
-use rpc::mayastor::{
-    BdevShareRequest,
-    BdevUri,
-    Child,
-    ChildState,
-    CreateNexusRequest,
-    CreateReply,
-    Nexus,
-    NexusState,
-    Null,
-    PublishNexusRequest,
-    ShareProtocolNexus,
+use rpc::{
+    mayastor::{
+        BdevShareRequest,
+        BdevUri,
+        Child,
+        ChildState,
+        CreateNexusRequest,
+        CreateReply,
+        DestroyNexusRequest,
+        Nexus,
+        NexusState,
+        Null,
+        PublishNexusRequest,
+        ShareProtocolNexus,
+    },
+    persistence::{
+        ChildInfo,
+        ChildState as PersistentChildState,
+        NexusInfo,
+        Reason as PersistentReason,
+    },
 };
-use std::{borrow::Cow, convert::TryFrom};
+use std::convert::TryFrom;
 use url::Url;
 
 pub mod common;
 
+/// This test checks that when a nexus disappears due to a container restart,
+/// the clean shutdown variable remains false.
 #[tokio::test]
-#[ignore = "waiting on PR https://github.com/openebs/Mayastor/pull/880"]
-async fn persist_child_state() {
+async fn persist_unexpected_restart() {
     let (test, _etcd_endpoint) =
-        start_infrastructure("persist_child_state").await;
+        start_infrastructure("persist_unexpected_restart").await;
+    let ms1 = &mut test.grpc_handle("ms1").await.unwrap();
+    let ms2 = &mut test.grpc_handle("ms2").await.unwrap();
+    let ms3 = &mut test.grpc_handle("ms3").await.unwrap();
+
+    // Create bdevs and share over nvmf.
+    let child1 = create_and_share_bdevs(ms2).await;
+    let child2 = create_and_share_bdevs(ms3).await;
+
+    // Create a nexus.
+    let nexus_uuid = "8272e9d3-3738-4e33-b8c3-769d8eed5771";
+    ms1.mayastor
+        .create_nexus(CreateNexusRequest {
+            uuid: nexus_uuid.to_string(),
+            size: 20 * 1024 * 1024,
+            children: vec![child1.clone(), child2.clone()],
+        })
+        .await
+        .expect("Failed to create nexus.");
+
+    // Check everything is healthy.
+    assert_eq!(
+        get_nexus_state(ms1, &nexus_uuid).await.unwrap(),
+        NexusState::NexusOnline as i32
+    );
+    assert_eq!(
+        get_child(ms1, &nexus_uuid, &child1).await.state,
+        ChildState::ChildOnline as i32
+    );
+    assert_eq!(
+        get_child(ms1, &nexus_uuid, &child2).await.state,
+        ChildState::ChildOnline as i32
+    );
+
+    // Get the nexus info from the store.
+    let mut etcd = Client::connect(["0.0.0.0:2379"], None).await.unwrap();
+    let response = etcd.get(nexus_uuid, None).await.expect("No entry found");
+    let value = response.kvs().first().unwrap().value();
+    let nexus_info: NexusInfo = serde_json::from_slice(value).unwrap();
+
+    // Check the clean shutdown variable is false.
+    assert_eq!(nexus_info.clean_shutdown, false);
+
+    // Check the persisted child info is healthy.
+
+    let child = child_info(&nexus_info, &uuid(&child1));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    let child = child_info(&nexus_info, &uuid(&child2));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    // Restart the container where the nexus lives.
+    test.restart("ms1")
+        .await
+        .expect("Failed to restart container.");
+
+    let response = etcd.get(nexus_uuid, None).await.expect("No entry found");
+    let value = response.kvs().first().unwrap().value();
+    let nexus_info: NexusInfo = serde_json::from_slice(value).unwrap();
+
+    // Check the clean shutdown variable is still false true.
+    assert_eq!(nexus_info.clean_shutdown, false);
+
+    // Check the persisted child info remains unchanged.
+
+    let child = child_info(&nexus_info, &uuid(&child1));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    let child = child_info(&nexus_info, &uuid(&child2));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+}
+
+/// This test checks that, when a nexus is destroyed successfully. the "clean
+/// shutdown" variable is persisted to the store correctly.
+#[tokio::test]
+async fn persist_clean_shutdown() {
+    let (test, _etcd_endpoint) =
+        start_infrastructure("persist_clean_shutdown").await;
+    let ms1 = &mut test.grpc_handle("ms1").await.unwrap();
+    let ms2 = &mut test.grpc_handle("ms2").await.unwrap();
+    let ms3 = &mut test.grpc_handle("ms3").await.unwrap();
+
+    // Create bdevs and share over nvmf.
+    let child1 = create_and_share_bdevs(ms2).await;
+    let child2 = create_and_share_bdevs(ms3).await;
+
+    // Create a nexus.
+    let nexus_uuid = "8272e9d3-3738-4e33-b8c3-769d8eed5771";
+    ms1.mayastor
+        .create_nexus(CreateNexusRequest {
+            uuid: nexus_uuid.to_string(),
+            size: 20 * 1024 * 1024,
+            children: vec![child1.clone(), child2.clone()],
+        })
+        .await
+        .expect("Failed to create nexus.");
+
+    // Check everything is healthy.
+    assert_eq!(
+        get_nexus_state(ms1, &nexus_uuid).await.unwrap(),
+        NexusState::NexusOnline as i32
+    );
+    assert_eq!(
+        get_child(ms1, &nexus_uuid, &child1).await.state,
+        ChildState::ChildOnline as i32
+    );
+    assert_eq!(
+        get_child(ms1, &nexus_uuid, &child2).await.state,
+        ChildState::ChildOnline as i32
+    );
+
+    // Get the nexus info from the store.
+    let mut etcd = Client::connect(["0.0.0.0:2379"], None).await.unwrap();
+    let response = etcd.get(nexus_uuid, None).await.expect("No entry found");
+    let value = response.kvs().first().unwrap().value();
+    let nexus_info: NexusInfo = serde_json::from_slice(value).unwrap();
+
+    // Check the clean shutdown variable is false.
+    assert_eq!(nexus_info.clean_shutdown, false);
+
+    // Check the persisted child info is healthy.
+
+    let child = child_info(&nexus_info, &uuid(&child1));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    let child = child_info(&nexus_info, &uuid(&child2));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    // Destroy the nexus
+    ms1.mayastor
+        .destroy_nexus(DestroyNexusRequest {
+            uuid: nexus_uuid.to_string(),
+        })
+        .await
+        .expect("Failed to destroy nexus");
+
+    let response = etcd.get(nexus_uuid, None).await.expect("No entry found");
+    let value = response.kvs().first().unwrap().value();
+    let nexus_info: NexusInfo = serde_json::from_slice(value).unwrap();
+
+    // Check the clean shutdown variable is true.
+    assert_eq!(nexus_info.clean_shutdown, true);
+
+    // Check the persisted child info remains unchanged.
+
+    let child = child_info(&nexus_info, &uuid(&child1));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    let child = child_info(&nexus_info, &uuid(&child2));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+}
+/// This test checks that the state of a child is successfully updated in the
+/// persistent store when there is an I/O failure.
+#[tokio::test]
+async fn persist_io_failure() {
+    let (test, _etcd_endpoint) =
+        start_infrastructure("persist_io_failure").await;
     let ms1 = &mut test.grpc_handle("ms1").await.unwrap();
     let ms2 = &mut test.grpc_handle("ms2").await.unwrap();
     let ms3 = &mut test.grpc_handle("ms3").await.unwrap();
@@ -58,7 +231,7 @@ async fn persist_child_state() {
         fio_run_verify(&devices[0].path.to_string()).unwrap()
     });
 
-    fio_hdl.await.expect_err("Fio is expected to fail.");
+    fio_hdl.await.unwrap();
 
     // Disconnect NVMF target
     target.disconnect().unwrap();
@@ -85,27 +258,23 @@ async fn persist_child_state() {
         ChildState::ChildFaulted as i32
     );
 
-    // Use etcd-client to get the value in the store.
+    // Use etcd-client to check the persisted entry.
+
     let mut etcd = Client::connect(["0.0.0.0:2379"], None).await.unwrap();
-    let key = uuid_from_uri(&child2).expect("Failed to get uuid");
-    let response = etcd.get(key, None).await.expect("No entry found");
+    let response = etcd.get(nexus_uuid, None).await.expect("No entry found");
     let value = response.kvs().first().unwrap().value();
-    let state: MayastorChildState = serde_json::from_slice(value).unwrap();
-    assert_eq!(state, MayastorChildState::Faulted(Reason::IoError))
-}
-/// Extract the child UUID from its name.
-fn uuid_from_uri(uri: &str) -> Option<String> {
-    let url = Url::parse(uri).ok()?;
-    let uuids = url
-        .query_pairs()
-        .into_iter()
-        .filter(|q| q.0 == Cow::from("uuid"))
-        .collect::<Vec<(Cow<str>, Cow<str>)>>();
-    if uuids.is_empty() {
-        return None;
-    }
-    let uuid = Cow::to_string(&uuids.first()?.1);
-    Some(uuid)
+    let nexus_info: NexusInfo = serde_json::from_slice(value).unwrap();
+    assert_eq!(nexus_info.clean_shutdown, false);
+
+    // Expect child1 to be healthy.
+    let child = child_info(&nexus_info, &uuid(&child1));
+    assert_eq!(child.state, PersistentChildState::Open as i32);
+    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+
+    // Expect child2 to be faulted due to an I/O error.
+    let child = child_info(&nexus_info, &uuid(&child2));
+    assert_eq!(child.state, PersistentChildState::Faulted as i32);
+    assert_eq!(child.reason, PersistentReason::IoError as i32);
 }
 
 async fn start_infrastructure(test_name: &str) -> (ComposeTest, String) {
@@ -240,4 +409,24 @@ async fn get_child(
         .collect::<Vec<_>>();
     assert_eq!(c.len(), 1);
     c[0].clone()
+}
+
+/// Return the child info of the child with the given UUID.
+fn child_info(nexus: &NexusInfo, uuid: &str) -> ChildInfo {
+    for child in &nexus.children {
+        if child.uuid == uuid {
+            return child.clone();
+        }
+    }
+    panic!("Child info not found for {}", uuid);
+}
+/// Extract UUID from uri.
+pub(crate) fn uuid(uri: &str) -> String {
+    let url = Url::parse(uri).expect("Failed to parse uri");
+    for pair in url.query_pairs() {
+        if pair.0 == "uuid" {
+            return pair.1.to_string();
+        }
+    }
+    panic!("URI does not contain a uuid query parameter.");
 }

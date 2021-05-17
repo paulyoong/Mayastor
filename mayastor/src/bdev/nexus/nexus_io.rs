@@ -639,11 +639,16 @@ impl NexusBio {
                             nexus.pause().await.unwrap();
                             nexus.set_failfast().await.unwrap();
                             nexus.reconfigure(DrEvent::ChildFault).await;
-                            nexus.persist(PersistOp::Update).await;
 
                             // Lookup child once more and finally remove it.
                             match nexus.child_lookup(&device) {
                                 Some(child) => {
+                                    nexus
+                                        .persist(PersistOp::Update((
+                                            child.uuid(),
+                                            child.state(),
+                                        )))
+                                        .await;
                                     // TODO: an error can occur here if a
                                     // separate task,
                                     // e.g. grpc request is also deleting the

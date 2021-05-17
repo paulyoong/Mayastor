@@ -10,56 +10,62 @@ use crate::{
 use rpc::persistence::{ChildInfo, NexusInfo};
 use std::{thread::sleep, time::Duration};
 
+type ChildUuid = String;
+
+/// Defines the type of persist operations.
 pub(crate) enum PersistOp {
+    /// Create a persistent entry.
     Create,
-    Update,
+    /// Update a persistent entry.
+    Update((ChildUuid, ChildState)),
+    /// Save the clean shutdown variable.
     Shutdown,
 }
 
 impl Nexus {
+    /// Persist information to the store.
     pub(crate) async fn persist(&self, op: PersistOp) {
         if !PersistentStore::enabled() {
             return;
         }
-        let mut persistent_info = self.persistent_info.lock().unwrap();
+        let mut nexus_info = self.nexus_info.lock().unwrap();
         match op {
             PersistOp::Create => {
                 // Initialisation of the persistent info will overwrite any
                 // existing entries.
                 // This should only be called on nexus creation.
-                persistent_info.clean_shutdown = false;
+                nexus_info.clean_shutdown = false;
                 self.children.iter().for_each(|c| {
                     let state: PersistentChildState = c.state().into();
                     let reason: PersistentReason = c.state().into();
-                    persistent_info.children.push(ChildInfo {
+                    nexus_info.children.push(ChildInfo {
                         uuid: c.uuid(),
                         state: state as i32,
                         reason: reason as i32,
                     });
                 });
             }
-            PersistOp::Update => {
-                // Only update the states of the children. Do not update the
-                // "clean shutdown" information.
+            PersistOp::Update((uuid, state)) => {
+                // Only update the state of the child that has changed. Do not
+                // update the other children or "clean shutdown" information.
                 // This should only be called on a child state change.
-                self.children.iter().for_each(|c| {
-                    let state: PersistentChildState = c.state().into();
-                    let reason: PersistentReason = c.state().into();
-                    persistent_info.children.push(ChildInfo {
-                        uuid: c.uuid(),
-                        state: state as i32,
-                        reason: reason as i32,
-                    });
+                nexus_info.children.iter_mut().for_each(|c| {
+                    let persistent_state: PersistentChildState = state.into();
+                    let persistent_reason: PersistentReason = state.into();
+                    if c.uuid == uuid {
+                        c.state = persistent_state as i32;
+                        c.reason = persistent_reason as i32;
+                    }
                 });
             }
             PersistOp::Shutdown => {
                 // Only update the clean shutdown variable. Do not update the
                 // child state information.
                 // This should only be called when destroying a nexus.
-                persistent_info.clean_shutdown = true;
+                nexus_info.clean_shutdown = true;
             }
         }
-        self.save(&persistent_info).await;
+        self.save(&nexus_info).await;
     }
 
     // Save the nexus info to the store. This is integral to ensuring data
