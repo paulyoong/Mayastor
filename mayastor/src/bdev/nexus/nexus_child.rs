@@ -30,10 +30,8 @@ use crate::{
         Reactors,
     },
     nexus_uri::NexusBdevError,
-    persistent_store::PersistentStore,
     rebuild::{ClientOperations, RebuildJob},
 };
-use std::{borrow::Cow, thread::sleep, time::Duration};
 use url::Url;
 
 #[derive(Debug, Snafu)]
@@ -382,62 +380,15 @@ impl NexusChild {
         }
     }
 
-    /// Save the child state to a persistent store.
-    pub(crate) async fn persist_state(&self) {
-        if !PersistentStore::enabled() {
-            // Can't persist the state because the store is not enabled.
-            return;
-        }
-
-        let child_uuid = match self.uuid() {
-            Some(uuid) => uuid,
-            None => {
-                // If we can't get a UUID of the child, we cannot persist its
-                // state, which is dangerous as it can lead to data corruption.
-                // We should never be able to reach this point as the UUID makes
-                // up the name of the child.
-                panic!("Failed to get UUID of child.")
-            }
-        };
-
-        // Storing the child state is integral to ensuring data consistency
-        // across restarts of Mayastor. Therefore, keep retrying until
-        // successful.
-        // TODO: Should we give up retrying eventually?
-        loop {
-            match PersistentStore::put(&child_uuid, &self.state()).await {
-                Ok(_) => {
-                    // The state was saved successfully.
-                    break;
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to store state {} for child {} with error {}. Retrying...",
-                        self.state(),
-                        self.name,
-                        e
-                    );
-                    // Allow some time for the connection to the persistent
-                    // store to be re-established before retrying the operation.
-                    sleep(Duration::from_secs(1));
-                }
-            }
-        }
-    }
-
     /// Extract the child UUID from its name.
-    fn uuid(&self) -> Option<String> {
-        let url = Url::parse(&self.name).ok()?;
-        let uuids = url
-            .query_pairs()
-            .into_iter()
-            .filter(|q| q.0 == Cow::from("uuid"))
-            .collect::<Vec<(Cow<str>, Cow<str>)>>();
-        if uuids.is_empty() {
-            return None;
+    pub(crate) fn uuid(&self) -> String {
+        let url = Url::parse(&self.name).expect("Failed to parse child url");
+        for pair in url.query_pairs() {
+            if pair.0 == "uuid" {
+                return pair.1.to_string();
+            }
         }
-        let uuid = Cow::to_string(&uuids.first()?.1);
-        Some(uuid)
+        panic!("Child name does not contain a uuid query parameter.");
     }
 
     /// returns the state of the child
