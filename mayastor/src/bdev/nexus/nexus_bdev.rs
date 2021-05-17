@@ -19,7 +19,7 @@ use tonic::{Code, Status};
 
 use crate::core::IoDevice;
 
-use rpc::mayastor::NvmeAnaState;
+use rpc::{mayastor::NvmeAnaState, persistence::NexusInfo};
 use spdk_sys::{spdk_bdev, spdk_bdev_register, spdk_bdev_unregister};
 
 use crate::{
@@ -342,6 +342,8 @@ pub struct Nexus {
     /// Nexus pause counter to allow concurrent pause/resume.
     pause_state: NexusPauseState,
     pause_waiters: Vec<oneshot::Sender<i32>>,
+    /// information saved to a persistent store
+    pub persistent_info: std::sync::Mutex<NexusInfo>,
 }
 
 unsafe impl core::marker::Sync for Nexus {}
@@ -473,6 +475,7 @@ impl Nexus {
             io_device: None,
             pause_state: NexusPauseState::Unpaused,
             pause_waiters: Vec::new(),
+            persistent_info: std::sync::Mutex::new(Default::default()),
         });
 
         // set the UUID of the underlying bdev
@@ -665,6 +668,8 @@ impl Nexus {
                 );
             }
         }
+        // Persist the fact that the nexus destruction has completed.
+        self.persist(PersistOp::Shutdown).await;
 
         let (s, r) = oneshot::channel::<bool>();
 
@@ -680,13 +685,6 @@ impl Nexus {
         if r.await.unwrap() {
             // Update the child states to remove them from the config file.
             NexusChild::save_state_change();
-            // // Remove children from the persistent store.
-            // for child in self.children.iter() {
-            //     PersistentStore::delete(&serde_json::json!(child.guid))
-            //         .await
-            //         .expect("Failed to delete entry from store");
-            // }
-
             Ok(())
         } else {
             Err(Error::NexusDestroy {

@@ -38,8 +38,8 @@ pub struct PersistentStore {
 
 impl PersistentStore {
     /// Start the persistent store.
-    /// This function must be called by the tokio runtime, because the work loop
-    /// executes using the etcd-client which requires tokio.
+    /// This function must be called by the tokio runtime, because the
+    /// etcd-client has a dependency on it.
     pub async fn run(endpoint: Option<String>) -> Result<(), ()> {
         if endpoint.is_none() {
             // No endpoint means no persistent store.

@@ -14,6 +14,7 @@ use crate::{
         nexus::{
             nexus_bdev::NEXUS_PRODUCT_ID,
             nexus_channel::{DrEvent, NexusChannel, NexusChannelInner},
+            nexus_persistence::PersistOp,
         },
         nexus_lookup,
         ChildState,
@@ -642,8 +643,7 @@ impl NexusBio {
                             nexus.pause().await.unwrap();
                             nexus.set_failfast().await.unwrap();
                             nexus.reconfigure(DrEvent::ChildFault).await;
-
-                            child.persist_state().await;
+                            nexus.persist(PersistOp::Update).await;
 
                             // Lookup child once more and finally remove it.
                             match nexus.child_lookup(&device) {
