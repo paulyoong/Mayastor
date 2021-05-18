@@ -25,7 +25,6 @@ use serde_json::Value;
 use snafu::ResultExt;
 use std::{future::Future, time::Duration};
 
-static ETCD_ENDPOINT: &str = "0.0.0.0:2379";
 static PERSISTENT_STORE: OnceCell<Option<PersistentStore>> = OnceCell::new();
 
 type TaskReceiver = oneshot::Receiver<Result<Option<Value>, StoreError>>;
@@ -94,11 +93,11 @@ impl PersistentStore {
     ) -> Result<(), StoreError> {
         let put_value = serde_json::to_value(value)
             .expect("Failed to convert value to a serde_json value");
-        let key_clone = key.to_string();
+        let key_string = key.to_string();
         let value_clone = put_value.clone();
         let rx = PersistentStore::execute_store_op(async move {
             PersistentStore::store()
-                .put_kv(&key_clone, &value_clone)
+                .put_kv(&key_string, &value_clone)
                 .await
                 .map(|_| None)
         });
@@ -112,9 +111,9 @@ impl PersistentStore {
 
     /// Retrieve a value, with the given key, from the store.
     pub async fn get(key: &impl StoreKey) -> Result<Value, StoreError> {
-        let key_clone = key.to_string();
+        let key_string = key.to_string();
         let rx = PersistentStore::execute_store_op(async move {
-            PersistentStore::store().get_kv(&key_clone).await.map(Some)
+            PersistentStore::store().get_kv(&key_string).await.map(Some)
         });
         rx.await
             .context(GetWait {
@@ -125,10 +124,10 @@ impl PersistentStore {
 
     /// Delete the entry in the store with the given key.
     pub async fn delete(key: &impl StoreKey) -> Result<(), StoreError> {
-        let key_clone = key.to_string();
+        let key_string = key.to_string();
         let rx = PersistentStore::execute_store_op(async move {
             PersistentStore::store()
-                .delete_kv(&key_clone)
+                .delete_kv(&key_string)
                 .await
                 .map(|_| None)
         });
@@ -159,7 +158,7 @@ impl PersistentStore {
                         );
                     }
                 })
-                .unwrap();
+                .expect("Failed to send future to Mayastor thread");
             let _ = rx.await;
         });
         rx
@@ -174,15 +173,10 @@ impl PersistentStore {
     fn store() -> Etcd {
         PERSISTENT_STORE
             .get()
-            .unwrap()
+            .expect("Persistent store should have been initialised")
             .as_ref()
-            .unwrap()
+            .expect("Failed to get a reference to the persistent store")
             .store
             .clone()
-    }
-
-    /// Returns the default etcd endpoint.
-    pub fn default_endpoint() -> String {
-        ETCD_ENDPOINT.to_string()
     }
 }

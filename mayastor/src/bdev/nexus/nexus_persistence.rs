@@ -95,7 +95,11 @@ impl Nexus {
                     // Allow some time for the connection to the persistent
                     // store to be re-established before retrying the operation.
                     let rx = mayastor_sleep(Duration::from_secs(1));
-                    rx.await.expect("Failed to wait for Mayastor sleep");
+                    if rx.await.is_err() {
+                        // Failed to wait for sleep but just carry on around the
+                        // loop and try the 'put' again anyway.
+                        error!("Failed to wait for Mayastor sleep");
+                    }
                 }
             }
         }
