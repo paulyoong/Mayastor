@@ -34,7 +34,7 @@ impl Nexus {
         if !PersistentStore::enabled() {
             return;
         }
-        let mut nexus_info = self.nexus_info.lock().unwrap();
+        let mut nexus_info = self.nexus_info.lock().await;
         match op {
             PersistOp::Create => {
                 // Initialisation of the persistent info will overwrite any

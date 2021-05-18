@@ -344,7 +344,7 @@ pub struct Nexus {
     pause_state: NexusPauseState,
     pause_waiters: Vec<oneshot::Sender<i32>>,
     /// information saved to a persistent store
-    pub nexus_info: std::sync::Mutex<NexusInfo>,
+    pub nexus_info: futures::lock::Mutex<NexusInfo>,
 }
 
 unsafe impl core::marker::Sync for Nexus {}
@@ -476,7 +476,7 @@ impl Nexus {
             io_device: None,
             pause_state: NexusPauseState::Unpaused,
             pause_waiters: Vec::new(),
-            nexus_info: std::sync::Mutex::new(Default::default()),
+            nexus_info: futures::lock::Mutex::new(Default::default()),
         });
 
         // set the UUID of the underlying bdev
