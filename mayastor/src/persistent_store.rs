@@ -23,7 +23,7 @@ use futures::channel::oneshot;
 use once_cell::sync::OnceCell;
 use serde_json::Value;
 use snafu::ResultExt;
-use std::{future::Future, thread::sleep, time::Duration};
+use std::{future::Future, time::Duration};
 
 static ETCD_ENDPOINT: &str = "0.0.0.0:2379";
 static PERSISTENT_STORE: OnceCell<Option<PersistentStore>> = OnceCell::new();
@@ -37,14 +37,13 @@ pub struct PersistentStore {
 }
 
 impl PersistentStore {
-    /// Start the persistent store.
+    /// Initialise the persistent store.
     /// This function must be called by the tokio runtime, because the
     /// etcd-client has a dependency on it.
-    pub async fn run(endpoint: Option<String>) -> Result<(), ()> {
+    pub async fn init(endpoint: Option<String>) -> Result<(), ()> {
         if endpoint.is_none() {
             // No endpoint means no persistent store.
             warn!("Persistent store not initialised");
-            PERSISTENT_STORE.get_or_init(|| None);
             return Ok(());
         }
 
@@ -72,6 +71,8 @@ impl PersistentStore {
         Ok(())
     }
 
+    /// Connect to etcd as the backing store.
+    /// This must be called from a tokio thread context.
     async fn connect_to_backing_store(endpoint: &str) -> Option<Etcd> {
         let mut retries = 3;
         while retries > 0 {
@@ -79,7 +80,7 @@ impl PersistentStore {
                 Ok(store) => return Some(store),
                 Err(_) => {
                     retries -= 1;
-                    sleep(Duration::from_secs(1));
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }

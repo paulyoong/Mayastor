@@ -23,6 +23,7 @@ pub mod persistent_store;
 pub mod pool;
 pub mod rebuild;
 pub mod replica;
+mod sleep;
 pub mod store;
 pub mod subsys;
 pub mod target;

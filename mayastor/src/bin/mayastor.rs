@@ -39,7 +39,7 @@ fn start_tokio_runtime(args: &MayastorCliArgs) {
                     .boxed(),
             );
             futures
-                .push(PersistentStore::run(persistent_store_endpoint).boxed());
+                .push(PersistentStore::init(persistent_store_endpoint).boxed());
 
             futures::future::try_join_all(futures)
                 .await

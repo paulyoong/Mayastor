@@ -6,9 +6,15 @@ use crate::{
         Reason,
     },
     persistent_store::PersistentStore,
+    sleep::mayastor_sleep,
 };
-use rpc::persistence::{ChildInfo, NexusInfo};
-use std::{thread::sleep, time::Duration};
+use rpc::persistence::{
+    ChildInfo,
+    ChildState as PersistentChildState,
+    NexusInfo,
+    Reason as PersistentReason,
+};
+use std::time::Duration;
 
 type ChildUuid = String;
 
@@ -88,17 +94,13 @@ impl Nexus {
                     );
                     // Allow some time for the connection to the persistent
                     // store to be re-established before retrying the operation.
-                    sleep(Duration::from_secs(1));
+                    let rx = mayastor_sleep(Duration::from_secs(1));
+                    rx.await.expect("Failed to wait for Mayastor sleep");
                 }
             }
         }
     }
 }
-
-use rpc::persistence::{
-    ChildState as PersistentChildState,
-    Reason as PersistentReason,
-};
 
 impl From<ChildState> for rpc::persistence::ChildState {
     fn from(state: ChildState) -> Self {
