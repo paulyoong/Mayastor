@@ -726,7 +726,7 @@ impl MayastorEnvironment {
                 )));
             }
             futures.push(Box::pin(subsys::Registration::run()));
-            futures.push(Box::pin(PersistentStore::run(
+            futures.push(Box::pin(PersistentStore::init(
                 persistent_store_endpoint,
             )));
             futures.push(Box::pin(master));
