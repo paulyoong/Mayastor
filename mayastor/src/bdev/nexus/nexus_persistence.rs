@@ -79,6 +79,7 @@ impl Nexus {
     // until successful.
     // TODO: Should we give up retrying eventually?
     async fn save(&self, info: &NexusInfo) {
+        let mut output_err = true;
         let nexus_uuid = self.name.strip_prefix("nexus-").unwrap_or(&self.name);
         loop {
             match PersistentStore::put(&nexus_uuid, info).await {
@@ -87,11 +88,17 @@ impl Nexus {
                     break;
                 }
                 Err(e) => {
-                    tracing::error!(
-                        "Failed to persist info {:?} with error {}. Retrying...",
-                        info,
-                        e
-                    );
+                    // Output an error message on first failure. Thereafter
+                    // silently retry.
+                    if output_err {
+                        error!(
+                            "Failed to persist info {:?} with error {}. Retrying...",
+                            info,
+                            e
+                        );
+                        output_err = false;
+                    }
+
                     // Allow some time for the connection to the persistent
                     // store to be re-established before retrying the operation.
                     let rx = mayastor_sleep(Duration::from_secs(1));

@@ -122,7 +122,7 @@ pub struct MayastorCliArgs {
     /// List of cores to run on instead of using the core mask. When specified
     /// it supersedes the core mask (-m) argument.
     pub core_list: Option<String>,
-    #[structopt(short = "-p")]
+    #[structopt(short = "p")]
     /// Endpoint of the persistent store.
     pub persistent_store_endpoint: Option<String>,
 }
@@ -714,6 +714,7 @@ impl MayastorEnvironment {
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
         rt.block_on(async {
+            PersistentStore::init(persistent_store_endpoint).await;
             let master = Reactors::current();
             master.send_future(async { f() });
             let mut futures: Vec<
@@ -726,9 +727,9 @@ impl MayastorEnvironment {
                 )));
             }
             futures.push(Box::pin(subsys::Registration::run()));
-            futures.push(Box::pin(PersistentStore::init(
-                persistent_store_endpoint,
-            )));
+            // futures.push(Box::pin(PersistentStore::init(
+            //     persistent_store_endpoint,
+            // )));
             futures.push(Box::pin(master));
             let _out = future::try_join_all(futures).await;
             info!("reactors stopped");

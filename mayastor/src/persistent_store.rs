@@ -39,11 +39,11 @@ impl PersistentStore {
     /// Initialise the persistent store.
     /// This function must be called by the tokio runtime, because the
     /// etcd-client has a dependency on it.
-    pub async fn init(endpoint: Option<String>) -> Result<(), ()> {
+    pub async fn init(endpoint: Option<String>) {
         if endpoint.is_none() {
             // No endpoint means no persistent store.
             warn!("Persistent store not initialised");
-            return Ok(());
+            return;
         }
 
         match PersistentStore::connect_to_backing_store(
@@ -66,8 +66,7 @@ impl PersistentStore {
                     endpoint.unwrap()
                 );
             }
-        }
-        Ok(())
+        };
     }
 
     /// Connect to etcd as the backing store.
@@ -119,7 +118,7 @@ impl PersistentStore {
             .context(GetWait {
                 key: key.to_string(),
             })?
-            .map(|r| r.unwrap())
+            .map(|value| value.unwrap())
     }
 
     /// Delete the entry in the store with the given key.

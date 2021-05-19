@@ -34,12 +34,12 @@ fn start_tokio_runtime(args: &MayastorCliArgs) {
                 futures.push(subsys::Registration::run().boxed());
             }
 
+            PersistentStore::init(persistent_store_endpoint).await;
+
             futures.push(
                 grpc::MayastorGrpcServer::run(grpc_address, rpc_address)
                     .boxed(),
             );
-            futures
-                .push(PersistentStore::init(persistent_store_endpoint).boxed());
 
             futures::future::try_join_all(futures)
                 .await
