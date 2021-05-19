@@ -330,7 +330,7 @@ pub struct Nexus {
     /// raw pointer to bdev (to destruct it later using Box::from_raw())
     bdev_raw: *mut spdk_bdev,
     /// represents the current state of the Nexus
-    pub(super) state: std::sync::Mutex<NexusState>,
+    pub(crate) state: std::sync::Mutex<NexusState>,
     /// the offset in num blocks where the data partition starts
     pub data_ent_offset: u64,
     /// the handle to be used when sharing the nexus, this allows for the bdev
@@ -884,6 +884,10 @@ impl Nexus {
 
         match errno_result_from_i32((), errno) {
             Ok(_) => {
+                // Persist the fact that the nexus is now successfully open.
+                // We have to do this before setting the nexus to open so that
+                // nexus list does not return this nexus until it is persisted.
+                self.persist(PersistOp::Create).await;
                 self.set_state(NexusState::Open);
                 self.io_device = Some(io_device);
                 Ok(())
@@ -1045,11 +1049,7 @@ pub async fn nexus_create(
             Err(error)
         }
 
-        Ok(_) => {
-            // Persist the fact that the nexus is now successfully open.
-            ni.persist(PersistOp::Create).await;
-            Ok(())
-        }
+        Ok(_) => Ok(()),
     }
 }
 

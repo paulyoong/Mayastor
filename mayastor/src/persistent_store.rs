@@ -25,6 +25,7 @@ use serde_json::Value;
 use snafu::ResultExt;
 use std::{future::Future, time::Duration};
 
+static DEFAULT_PORT: &str = "2379";
 static PERSISTENT_STORE: OnceCell<Option<PersistentStore>> = OnceCell::new();
 
 type TaskReceiver = oneshot::Receiver<Result<Option<Value>, StoreError>>;
@@ -40,49 +41,52 @@ impl PersistentStore {
     /// This function must be called by the tokio runtime, because the
     /// etcd-client has a dependency on it.
     pub async fn init(endpoint: Option<String>) {
-        if endpoint.is_none() {
-            // No endpoint means no persistent store.
-            warn!("Persistent store not initialised");
-            return;
-        }
-
-        match PersistentStore::connect_to_backing_store(
-            &endpoint.clone().unwrap(),
-        )
-        .await
-        {
-            Some(etcd) => {
-                // Initialise the persistent store.
-                PERSISTENT_STORE.get_or_init(|| {
-                    Some(PersistentStore {
-                        store: etcd,
-                    })
-                });
-            }
+        let endpoint = match endpoint {
+            Some(e) => match e.contains(':') {
+                true => e,
+                false => {
+                    format!("{}:{}", e, DEFAULT_PORT)
+                }
+            },
             None => {
-                // If the store cannot be connected to, we cannot run.
-                panic!(
-                    "Failed to connect to etcd on endpoint {}",
-                    endpoint.unwrap()
-                );
+                // No endpoint means no persistent store.
+                warn!("Persistent store not initialised");
+                return;
             }
         };
+
+        let store =
+            PersistentStore::connect_to_backing_store(&endpoint.clone()).await;
+        PERSISTENT_STORE.get_or_init(|| {
+            Some(PersistentStore {
+                store,
+            })
+        });
     }
 
     /// Connect to etcd as the backing store.
     /// This must be called from a tokio thread context.
-    async fn connect_to_backing_store(endpoint: &str) -> Option<Etcd> {
-        let mut retries = 3;
-        while retries > 0 {
+    async fn connect_to_backing_store(endpoint: &str) -> Etcd {
+        let mut output_err = true;
+        // Continually try to connect to etcd.
+        loop {
             match Etcd::new(endpoint).await {
-                Ok(store) => return Some(store),
+                Ok(store) => {
+                    info!("Connected to etcd on endpoint {}", endpoint);
+                    return store;
+                }
                 Err(_) => {
-                    retries -= 1;
+                    if output_err {
+                        error!(
+                            "Failed to connect to etcd on endpoint {}",
+                            endpoint
+                        );
+                        output_err = false;
+                    }
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
-        None
     }
 
     /// Put a key-value in the store.
