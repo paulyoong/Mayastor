@@ -92,8 +92,7 @@ impl Nexus {
                     // silently retry.
                     if output_err {
                         error!(
-                            "Failed to persist info {:?} with error {}. Retrying...",
-                            info,
+                            "Failed to persist with error {}. Retrying...",
                             e
                         );
                         output_err = false;

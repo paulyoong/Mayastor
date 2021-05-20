@@ -54,7 +54,7 @@ impl Store for Etcd {
             .await
             .context(Put {
                 key: key.to_string(),
-                value: serde_json::to_vec(value).context(SerialiseValue)?,
+                value: serde_json::to_string(value).unwrap(),
             })?;
         Ok(())
     }

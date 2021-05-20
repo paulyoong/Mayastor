@@ -99,15 +99,30 @@ impl PersistentStore {
         let key_string = key.to_string();
         let value_clone = put_value.clone();
         let rx = PersistentStore::execute_store_op(async move {
-            PersistentStore::store()
+            info!(
+                "Putting key {}, value {} in store.",
+                key_string,
+                value_clone.to_string()
+            );
+            match PersistentStore::store()
                 .put_kv(&key_string, &value_clone)
                 .await
-                .map(|_| None)
+            {
+                Ok(_) => {
+                    info!(
+                        "Successfully put key {}, value {} in store.",
+                        key_string,
+                        value_clone.to_string()
+                    );
+                    Ok(None)
+                }
+                Err(e) => Err(e),
+            }
         });
 
         let result = rx.await.context(PutWait {
             key: key.to_string(),
-            value: put_value,
+            value: put_value.to_string(),
         })?;
         result.map(|_| ())
     }
@@ -116,7 +131,14 @@ impl PersistentStore {
     pub async fn get(key: &impl StoreKey) -> Result<Value, StoreError> {
         let key_string = key.to_string();
         let rx = PersistentStore::execute_store_op(async move {
-            PersistentStore::store().get_kv(&key_string).await.map(Some)
+            info!("Getting key {} from store.", key_string);
+            match PersistentStore::store().get_kv(&key_string).await {
+                Ok(value) => {
+                    info!("Successfully got key {}", key_string);
+                    Ok(Some(value))
+                }
+                Err(e) => Err(e),
+            }
         });
         rx.await
             .context(GetWait {
@@ -129,10 +151,17 @@ impl PersistentStore {
     pub async fn delete(key: &impl StoreKey) -> Result<(), StoreError> {
         let key_string = key.to_string();
         let rx = PersistentStore::execute_store_op(async move {
-            PersistentStore::store()
-                .delete_kv(&key_string)
-                .await
-                .map(|_| None)
+            info!("Deleting key {} from store.", key_string);
+            match PersistentStore::store().delete_kv(&key_string).await {
+                Ok(_) => {
+                    info!(
+                        "Successfully deleted key {} from store.",
+                        key_string
+                    );
+                    Ok(None)
+                }
+                Err(e) => Err(e),
+            }
         });
         rx.await
             .context(DeleteWait {

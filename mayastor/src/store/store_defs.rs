@@ -14,14 +14,14 @@ pub enum StoreError {
     Connect { source: Error },
     /// Failed to 'put' an entry in the store.
     #[snafu(display(
-        "Failed to 'put' entry with key {} and value {:?}. Error {}",
+        "Failed to 'put' entry with key {} and value {}. Error {}",
         key,
         value,
         source
     ))]
     Put {
         key: String,
-        value: Vec<u8>,
+        value: String,
         source: Error,
     },
     /// Failed to wait for 'put' operation.
@@ -32,7 +32,7 @@ pub enum StoreError {
     ))]
     PutWait {
         key: String,
-        value: serde_json::Value,
+        value: String,
         source: futures::channel::oneshot::Canceled,
     },
     /// Failed to 'get' an entry from the store.
