@@ -93,6 +93,9 @@ pub enum StoreError {
     /// Failed to serialise value.
     #[snafu(display("Failed to serialise value. Error {}", source))]
     SerialiseValue { source: SerdeError },
+    /// Operation timed out.
+    #[snafu(display("Store operation timed out.",))]
+    OpTimeout {},
 }
 
 /// Store keys type trait

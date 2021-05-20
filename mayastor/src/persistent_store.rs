@@ -23,10 +23,11 @@ use futures::channel::oneshot;
 use once_cell::sync::OnceCell;
 use serde_json::Value;
 use snafu::ResultExt;
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Mutex, time::Duration};
 
 static DEFAULT_PORT: &str = "2379";
-static PERSISTENT_STORE: OnceCell<Option<PersistentStore>> = OnceCell::new();
+static PERSISTENT_STORE: OnceCell<Option<Mutex<PersistentStore>>> =
+    OnceCell::new();
 
 type TaskReceiver = oneshot::Receiver<Result<Option<Value>, StoreError>>;
 
@@ -34,6 +35,7 @@ type TaskReceiver = oneshot::Receiver<Result<Option<Value>, StoreError>>;
 pub struct PersistentStore {
     /// Backing store used for persistence.
     store: Etcd,
+    endpoint: String,
 }
 
 impl PersistentStore {
@@ -58,9 +60,10 @@ impl PersistentStore {
         let store =
             PersistentStore::connect_to_backing_store(&endpoint.clone()).await;
         PERSISTENT_STORE.get_or_init(|| {
-            Some(PersistentStore {
+            Some(Mutex::new(PersistentStore {
                 store,
-            })
+                endpoint,
+            }))
         });
     }
 
@@ -179,9 +182,17 @@ impl PersistentStore {
     ) -> TaskReceiver {
         let (tx, rx) = oneshot::channel::<Result<Option<Value>, StoreError>>();
         spawn(async move {
-            let result = f.await;
-            let thread = Mthread::get_init();
+            let result =
+                match tokio::time::timeout(Duration::from_secs(10), f).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        PersistentStore::reconnect().await;
+                        Err(StoreError::OpTimeout {})
+                    }
+                };
+
             // Execute the sending of the result on a "Mayastor thread".
+            let thread = Mthread::get_init();
             let rx = thread
                 .spawn_local(async move {
                     if tx.send(result).is_err() {
@@ -205,10 +216,44 @@ impl PersistentStore {
     fn store() -> Etcd {
         PERSISTENT_STORE
             .get()
-            .expect("Persistent store should have been initialised")
+            .unwrap()
             .as_ref()
-            .expect("Failed to get a reference to the persistent store")
+            .unwrap()
+            .lock()
+            .unwrap()
             .store
             .clone()
+
+        // PERSISTENT_STORE
+        //     .get()
+        //     .expect("Persistent store should have been initialised")
+        //     .as_ref()
+        //     .expect("Failed to get a reference to the persistent store")
+        //     .store
+        //     .lock()
+        //     .unwrap()
+        //     .clone()
+    }
+
+    fn endpoint() -> String {
+        PERSISTENT_STORE
+            .get()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .endpoint
+            .clone()
+    }
+
+    async fn reconnect() {
+        let store = PersistentStore::connect_to_backing_store(
+            &PersistentStore::endpoint(),
+        )
+        .await;
+        let opt_store = PERSISTENT_STORE.get().unwrap();
+        let mut locked_store = opt_store.as_ref().unwrap().lock().unwrap();
+        locked_store.store = store;
     }
 }
