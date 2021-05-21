@@ -54,6 +54,7 @@ mkShell {
     python3
     utillinux
     xfsprogs
+    etcd
   ]
   ++ (if (nospdk) then [ libspdk-dev.buildInputs ] else [ libspdk-dev ])
   ++ pkgs.lib.optional (!norust) channel.nightly.rust;

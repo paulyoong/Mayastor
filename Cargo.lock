@@ -943,6 +943,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "etcd-client"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d80294643e620e280bece8df0eca6933c3c3cec2b3179803ef00b76183e9f5e"
+dependencies = [
+ "http",
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1529,6 +1543,7 @@ dependencies = [
  "crossbeam-sync",
  "dns-lookup",
  "env_logger",
+ "etcd-client",
  "futures",
  "git-version",
  "http",

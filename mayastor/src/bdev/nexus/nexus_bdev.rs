@@ -19,7 +19,7 @@ use tonic::{Code, Status};
 
 use crate::core::IoDevice;
 
-use rpc::mayastor::NvmeAnaState;
+use rpc::{mayastor::NvmeAnaState, persistence::NexusInfo};
 use spdk_sys::{spdk_bdev, spdk_bdev_register, spdk_bdev_unregister};
 
 use crate::{
@@ -36,6 +36,7 @@ use crate::{
             nexus_child::{ChildError, ChildState, NexusChild},
             nexus_label::LabelError,
             nexus_nbd::{NbdDisk, NbdError},
+            nexus_persistence::PersistOp,
         },
     },
     core::{Bdev, CoreError, Cores, IoType, Protocol, Reactor, Share},
@@ -342,6 +343,8 @@ pub struct Nexus {
     /// Nexus pause counter to allow concurrent pause/resume.
     pause_state: NexusPauseState,
     pause_waiters: Vec<oneshot::Sender<i32>>,
+    /// information saved to a persistent store
+    pub nexus_info: futures::lock::Mutex<NexusInfo>,
 }
 
 unsafe impl core::marker::Sync for Nexus {}
@@ -477,6 +480,7 @@ impl Nexus {
             io_device: None,
             pause_state: NexusPauseState::Unpaused,
             pause_waiters: Vec::new(),
+            nexus_info: futures::lock::Mutex::new(Default::default()),
         });
 
         // set the UUID of the underlying bdev
