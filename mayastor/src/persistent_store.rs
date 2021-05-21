@@ -1,11 +1,11 @@
 //! The persistent store is used to save information that is required by
 //! Mayastor across restarts.
 //!
-//! etcd is used as the backing store and is interfaced with through the use of
+//! etcd is used as the backing store and is interacted with through the use of
 //! the etcd-client crate. This crate has a dependency on the tokio async
 //! runtime.
 use crate::{
-    core::{runtime::spawn, Mthread},
+    core,
     store::{
         etcd::Etcd,
         store_defs::{
@@ -29,36 +29,30 @@ static DEFAULT_PORT: &str = "2379";
 static PERSISTENT_STORE: OnceCell<Option<Mutex<PersistentStore>>> =
     OnceCell::new();
 
-type TaskReceiver = oneshot::Receiver<Result<Option<Value>, StoreError>>;
-
 /// Persistent store
 pub struct PersistentStore {
     /// Backing store used for persistence.
     store: Etcd,
+    /// Endpoint of the backing store.
     endpoint: String,
 }
 
 impl PersistentStore {
     /// Initialise the persistent store.
-    /// This function must be called by the tokio runtime, because the
-    /// etcd-client has a dependency on it.
+    /// If the supplied endpoint is 'None', the store is uninitalised and
+    /// unavailable for use.
     pub async fn init(endpoint: Option<String>) {
-        let endpoint = match endpoint {
-            Some(e) => match e.contains(':') {
-                true => e,
-                false => {
-                    format!("{}:{}", e, DEFAULT_PORT)
-                }
-            },
-            None => {
-                // No endpoint means no persistent store.
-                warn!("Persistent store not initialised");
-                return;
-            }
-        };
+        if endpoint.is_none() {
+            // No endpoint means no persistent store.
+            warn!("Persistent store not initialised");
+            return;
+        }
 
-        let store =
-            PersistentStore::connect_to_backing_store(&endpoint.clone()).await;
+        assert!(endpoint.is_some());
+
+        // An endpoint has been provided, initialise the persistent store.
+        let endpoint = Self::format_endpoint(&endpoint.unwrap());
+        let store = Self::connect_to_backing_store(&endpoint.clone()).await;
         PERSISTENT_STORE.get_or_init(|| {
             Some(Mutex::new(PersistentStore {
                 store,
@@ -67,11 +61,20 @@ impl PersistentStore {
         });
     }
 
+    /// Adds the default port to the endpoint if one isn't already specified.
+    fn format_endpoint(endpoint: &str) -> String {
+        match endpoint.contains(':') {
+            true => endpoint.to_string(),
+            false => format!("{}:{}", endpoint, DEFAULT_PORT),
+        }
+    }
+
     /// Connect to etcd as the backing store.
-    /// This must be called from a tokio thread context.
+    /// A connection to the store will be attempted continuously until
+    /// successful. This is necessary as the backing store is essential to the
+    /// operation of Mayastor across restarts.
     async fn connect_to_backing_store(endpoint: &str) -> Etcd {
         let mut output_err = true;
-        // Continually try to connect to etcd.
         loop {
             match Etcd::new(endpoint).await {
                 Ok(store) => {
@@ -80,6 +83,8 @@ impl PersistentStore {
                 }
                 Err(_) => {
                     if output_err {
+                        // Only output the error on first failure to prevent
+                        // flooding the logs.
                         error!(
                             "Failed to connect to etcd on endpoint {}",
                             endpoint
@@ -101,13 +106,14 @@ impl PersistentStore {
             .expect("Failed to convert value to a serde_json value");
         let key_string = key.to_string();
         let value_clone = put_value.clone();
-        let rx = PersistentStore::execute_store_op(async move {
+
+        let rx = Self::execute_store_op(async move {
             info!(
                 "Putting key {}, value {} in store.",
                 key_string,
                 value_clone.to_string()
             );
-            match PersistentStore::store()
+            match Self::backing_store()
                 .put_kv(&key_string, &value_clone)
                 .await
             {
@@ -133,9 +139,9 @@ impl PersistentStore {
     /// Retrieve a value, with the given key, from the store.
     pub async fn get(key: &impl StoreKey) -> Result<Value, StoreError> {
         let key_string = key.to_string();
-        let rx = PersistentStore::execute_store_op(async move {
+        let rx = Self::execute_store_op(async move {
             info!("Getting key {} from store.", key_string);
-            match PersistentStore::store().get_kv(&key_string).await {
+            match Self::backing_store().get_kv(&key_string).await {
                 Ok(value) => {
                     info!("Successfully got key {}", key_string);
                     Ok(Some(value))
@@ -153,9 +159,9 @@ impl PersistentStore {
     /// Delete the entry in the store with the given key.
     pub async fn delete(key: &impl StoreKey) -> Result<(), StoreError> {
         let key_string = key.to_string();
-        let rx = PersistentStore::execute_store_op(async move {
+        let rx = Self::execute_store_op(async move {
             info!("Deleting key {} from store.", key_string);
-            match PersistentStore::store().delete_kv(&key_string).await {
+            match Self::backing_store().delete_kv(&key_string).await {
                 Ok(_) => {
                     info!(
                         "Successfully deleted key {} from store.",
@@ -175,24 +181,25 @@ impl PersistentStore {
 
     /// Executes a future representing a store operation (i.e. put, get, delete)
     /// on the tokio runtime.
-    /// A channel is returned which can be waited on for the operation to
-    /// complete.
+    /// A channel is returned which is signalled when the operation completes.
+    /// If an operation times out, reconnect to the backing store before failing
+    /// the operation.
     fn execute_store_op(
         f: impl Future<Output = Result<Option<Value>, StoreError>> + Send + 'static,
-    ) -> TaskReceiver {
+    ) -> oneshot::Receiver<Result<Option<Value>, StoreError>> {
         let (tx, rx) = oneshot::channel::<Result<Option<Value>, StoreError>>();
-        spawn(async move {
+        core::runtime::spawn(async move {
             let result =
-                match tokio::time::timeout(Duration::from_secs(10), f).await {
+                match tokio::time::timeout(Duration::from_secs(5), f).await {
                     Ok(result) => result,
                     Err(_) => {
-                        PersistentStore::reconnect().await;
+                        Self::reconnect().await;
                         Err(StoreError::OpTimeout {})
                     }
                 };
 
             // Execute the sending of the result on a "Mayastor thread".
-            let thread = Mthread::get_init();
+            let thread = core::Mthread::get_init();
             let rx = thread
                 .spawn_local(async move {
                     if tx.send(result).is_err() {
@@ -212,48 +219,32 @@ impl PersistentStore {
         PERSISTENT_STORE.get().is_some()
     }
 
+    /// Get the persistent store.
+    fn persistent_store() -> &'static Mutex<PersistentStore> {
+        PERSISTENT_STORE
+            .get()
+            .expect("Persistent store should have been initialised")
+            .as_ref()
+            .expect("Failed to get persistent store")
+    }
+
     /// Get an instance of the backing store.
-    fn store() -> Etcd {
-        PERSISTENT_STORE
-            .get()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .store
-            .clone()
-
-        // PERSISTENT_STORE
-        //     .get()
-        //     .expect("Persistent store should have been initialised")
-        //     .as_ref()
-        //     .expect("Failed to get a reference to the persistent store")
-        //     .store
-        //     .lock()
-        //     .unwrap()
-        //     .clone()
+    fn backing_store() -> Etcd {
+        Self::persistent_store().lock().unwrap().store.clone()
     }
 
+    /// Get the endpoint of the backing store.
     fn endpoint() -> String {
-        PERSISTENT_STORE
-            .get()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .endpoint
-            .clone()
+        Self::persistent_store().lock().unwrap().endpoint.clone()
     }
 
+    /// Reconnects to the backing store and replaces the old connection with the
+    /// new connection.
     async fn reconnect() {
-        let store = PersistentStore::connect_to_backing_store(
-            &PersistentStore::endpoint(),
-        )
-        .await;
-        let opt_store = PERSISTENT_STORE.get().unwrap();
-        let mut locked_store = opt_store.as_ref().unwrap().lock().unwrap();
-        locked_store.store = store;
+        warn!("Attempting to reconnect to persistent store....");
+        let persistent_store = Self::persistent_store();
+        let backing_store =
+            Self::connect_to_backing_store(&PersistentStore::endpoint()).await;
+        persistent_store.lock().unwrap().store = backing_store;
     }
 }
