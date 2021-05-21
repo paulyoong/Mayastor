@@ -32,6 +32,7 @@ use crate::{
     nexus_uri::NexusBdevError,
     rebuild::{ClientOperations, RebuildJob},
 };
+use url::Url;
 
 #[derive(Debug, Snafu)]
 pub enum ChildError {
@@ -377,6 +378,17 @@ impl NexusChild {
         if ChildStatusConfig::save().is_err() {
             error!("Failed to save child status information");
         }
+    }
+
+    /// Extract the child UUID from its name.
+    pub(crate) fn uuid(&self) -> String {
+        let url = Url::parse(&self.name).expect("Failed to parse child url");
+        for pair in url.query_pairs() {
+            if pair.0 == "uuid" {
+                return pair.1.to_string();
+            }
+        }
+        panic!("Child name does not contain a uuid query parameter.");
     }
 
     /// returns the state of the child

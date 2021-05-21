@@ -14,6 +14,7 @@ use crate::{
         nexus::{
             nexus_bdev::NEXUS_PRODUCT_ID,
             nexus_channel::{DrEvent, NexusChannel, NexusChannelInner},
+            nexus_persistence::PersistOp,
         },
         nexus_lookup,
         ChildState,
@@ -248,8 +249,12 @@ impl NexusBio {
         child: &dyn BlockDevice,
         status: IoCompletionStatus,
     ) {
-        assert_eq!(self.ctx().core, Cores::current());
         let success = status == IoCompletionStatus::Success;
+        // If the IO failed it is possible that completion callback is
+        // called from a different core.
+        if success {
+            assert_eq!(self.ctx().core, Cores::current());
+        }
 
         // decrement the counter of in flight IO
         self.ctx_as_mut().in_flight -= 1;
@@ -642,6 +647,12 @@ impl NexusBio {
                             // Lookup child once more and finally remove it.
                             match nexus.child_lookup(&device) {
                                 Some(child) => {
+                                    nexus
+                                        .persist(PersistOp::Update((
+                                            child.uuid(),
+                                            child.state(),
+                                        )))
+                                        .await;
                                     // TODO: an error can occur here if a
                                     // separate task,
                                     // e.g. grpc request is also deleting the

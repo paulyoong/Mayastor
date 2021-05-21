@@ -2,8 +2,6 @@
 
 const path = require('path');
 const { spawn } = require('child_process');
-const chai = require('chai');
-const dirtyChai = require('dirty-chai');
 
 const logger = require('../logger');
 const workqTest = require('./workq_test.js');
@@ -26,9 +24,6 @@ const csiTest = require('./csi_test.js');
 
 require('source-map-support').install();
 logger.setLevel('silly');
-
-// Function form for terminating assertion properties to make JS linter happy
-chai.use(dirtyChai);
 
 describe('moac', function () {
   describe('workq', workqTest);
@@ -57,6 +52,7 @@ describe('moac', function () {
 
     const child = spawn(path.join(__dirname, '..', 'moac'), [
       '-s',
+      '--namespace=default',
       // NATS does not run but just to verify that the option works
       '--message-bus=127.0.0.1',
       // shorten the warm up to make the test faster
