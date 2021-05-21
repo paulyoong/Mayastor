@@ -26,6 +26,7 @@ use snafu::ResultExt;
 use std::{future::Future, sync::Mutex, time::Duration};
 
 static DEFAULT_PORT: &str = "2379";
+static STORE_OP_TIMEOUT: Duration = Duration::from_secs(30);
 static PERSISTENT_STORE: OnceCell<Option<Mutex<PersistentStore>>> =
     OnceCell::new();
 
@@ -189,14 +190,13 @@ impl PersistentStore {
     ) -> oneshot::Receiver<Result<Option<Value>, StoreError>> {
         let (tx, rx) = oneshot::channel::<Result<Option<Value>, StoreError>>();
         core::runtime::spawn(async move {
-            let result =
-                match tokio::time::timeout(Duration::from_secs(5), f).await {
-                    Ok(result) => result,
-                    Err(_) => {
-                        Self::reconnect().await;
-                        Err(StoreError::OpTimeout {})
-                    }
-                };
+            let result = match tokio::time::timeout(STORE_OP_TIMEOUT, f).await {
+                Ok(result) => result,
+                Err(_) => {
+                    Self::reconnect().await;
+                    Err(StoreError::OpTimeout {})
+                }
+            };
 
             // Execute the sending of the result on a "Mayastor thread".
             let thread = core::Mthread::get_init();
