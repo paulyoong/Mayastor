@@ -24,7 +24,7 @@ use rpc::{
         Reason as PersistentReason,
     },
 };
-use std::convert::TryFrom;
+use std::{convert::TryFrom, thread::sleep, time::Duration};
 use url::Url;
 
 pub mod common;
@@ -229,6 +229,48 @@ async fn persist_io_failure() {
     assert_eq!(child.reason, PersistentReason::IoError as i32);
 }
 
+/// This test checks the behaviour when a connection to the persistent store is
+/// faulty.
+#[tokio::test]
+async fn persistent_store_connection() {
+    let test = start_infrastructure("persistent_store_connection").await;
+    let ms1 = &mut test.grpc_handle("ms1").await.unwrap();
+    let ms2 = &mut test.grpc_handle("ms2").await.unwrap();
+    let ms3 = &mut test.grpc_handle("ms3").await.unwrap();
+
+    // Pause the etcd container.
+    test.pause("etcd")
+        .await
+        .expect("Failed to pause the etcd container");
+
+    // Create bdevs and share over nvmf.
+    let child1 = create_and_share_bdevs(ms2).await;
+    let child2 = create_and_share_bdevs(ms3).await;
+
+    // Attempt to create a nexus.
+    // This operation requires the persistent store to be updated. Because etcd
+    // is currently unavailable, the operation is expected to timeout.
+    let nexus_uuid = "8272e9d3-3738-4e33-b8c3-769d8eed5771";
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        create_nexus(ms1, nexus_uuid, vec![child1.clone(), child2.clone()]),
+    )
+    .await
+    .expect_err("Create nexus should have timed out.");
+
+    // Unpause the etcd container.
+    test.thaw("etcd")
+        .await
+        .expect("Failed to unpause the etcd container.");
+
+    // Allow some time for the connection to etcd to be re-established.
+    sleep(Duration::from_secs(5));
+
+    // Once etcd becomes available again the previously timed out operation
+    // should complete. Therefore check the nexus has been created.
+    assert!(get_nexus(ms1, nexus_uuid).await.is_some());
+}
+
 /// Start the containers for the tests.
 async fn start_infrastructure(test_name: &str) -> ComposeTest {
     let etcd_endpoint = format!("http://etcd.{}:2379", test_name);
@@ -314,7 +356,7 @@ async fn create_and_share_bdevs(hdl: &mut RpcHandle) -> String {
 }
 
 /// Returns the nexus with the given uuid.
-async fn get_nexus(hdl: &mut RpcHandle, uuid: &str) -> Nexus {
+async fn get_nexus(hdl: &mut RpcHandle, uuid: &str) -> Option<Nexus> {
     let nexus_list = hdl
         .mayastor
         .list_nexus(Null {})
@@ -326,8 +368,10 @@ async fn get_nexus(hdl: &mut RpcHandle, uuid: &str) -> Nexus {
         .iter()
         .filter(|n| n.uuid == uuid)
         .collect::<Vec<_>>();
-    assert_eq!(n.len(), 1);
-    n[0].clone()
+    if n.is_empty() {
+        return None;
+    }
+    Some(n[0].clone())
 }
 
 /// Returns the state of the nexus with the given uuid.
@@ -353,7 +397,9 @@ async fn get_child(
     nexus_uuid: &str,
     child_uri: &str,
 ) -> Child {
-    let n = get_nexus(hdl, nexus_uuid).await;
+    let n = get_nexus(hdl, nexus_uuid)
+        .await
+        .expect("Failed to get nexus");
     let c = n
         .children
         .iter()
