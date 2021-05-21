@@ -727,9 +727,6 @@ impl MayastorEnvironment {
                 )));
             }
             futures.push(Box::pin(subsys::Registration::run()));
-            // futures.push(Box::pin(PersistentStore::init(
-            //     persistent_store_endpoint,
-            // )));
             futures.push(Box::pin(master));
             let _out = future::try_join_all(futures).await;
             info!("reactors stopped");
