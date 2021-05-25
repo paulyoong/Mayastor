@@ -13,6 +13,8 @@ use crate::{
         nexus::{
             nexus_bdev::NEXUS_PRODUCT_ID,
             nexus_channel::{NexusChannel, NexusChannelInner},
+            nexus_child::NexusChild,
+            nexus_persistence::PersistOp,
         },
         nexus_lookup,
         Nexus,
@@ -293,7 +295,10 @@ impl NexusBio {
                 trace!(
                     "(core: {} thread: {}): read IO to {} submission failed with error {:?}",
                     Cores::current(), Mthread::current().unwrap().name(), device, r);
-                inner.remove_child_in_submit(&device);
+                let need_retire = inner.remove_child_in_submit(&device);
+                if need_retire {
+                    self.do_retire(device);
+                }
                 self.fail();
             } else {
                 self.ctx_as_mut().in_flight += 1;
@@ -512,13 +517,14 @@ impl NexusBio {
 
         // if there are channels left -- retry the IO other wise fail the IO.
         // TODO: succesfull IO's would not require a retry.
-        if self.inner_channel().writers.is_empty()
-            || self.inner_channel().readers.is_empty()
-        {
-            self.fail_checked();
-        } else {
-            self.retry_checked();
-        }
+        self.fail_checked();
+        // if self.inner_channel().writers.is_empty()
+        //     || self.inner_channel().readers.is_empty()
+        // {
+        //     self.fail_checked();
+        // } else {
+        //     self.retry_checked();
+        // }
     }
 
     /// Retire a child for this nexus.

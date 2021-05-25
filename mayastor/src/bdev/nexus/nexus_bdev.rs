@@ -330,7 +330,7 @@ pub struct Nexus {
     /// raw pointer to bdev (to destruct it later using Box::from_raw())
     bdev_raw: *mut spdk_bdev,
     /// represents the current state of the Nexus
-    pub(super) state: parking_lot::Mutex<NexusState>,
+    pub(crate) state: parking_lot::Mutex<NexusState>,
     /// the offset in num blocks where the data partition starts
     pub data_ent_offset: u64,
     /// the handle to be used when sharing the nexus, this allows for the bdev
@@ -674,6 +674,9 @@ impl Nexus {
             }
         }
 
+        // Persist the fact that the nexus destruction has completed.
+        self.persist(PersistOp::Shutdown).await;
+
         let (s, r) = oneshot::channel::<bool>();
 
         unsafe {
@@ -890,6 +893,10 @@ impl Nexus {
 
         match errno_result_from_i32((), errno) {
             Ok(_) => {
+                // Persist the fact that the nexus is now successfully open.
+                // We have to do this before setting the nexus to open so that
+                // nexus list does not return this nexus until it is persisted.
+                self.persist(PersistOp::Create).await;
                 self.set_state(NexusState::Open);
                 self.io_device = Some(io_device);
                 Ok(())
