@@ -2,28 +2,23 @@ use crate::common::fio_run_verify;
 use common::compose::Builder;
 use composer::{Binary, ComposeTest, ContainerSpec, RpcHandle};
 use etcd_client::Client;
-use rpc::{
-    mayastor::{
-        BdevShareRequest,
-        BdevUri,
-        Child,
-        ChildState,
-        CreateNexusRequest,
-        CreateReply,
-        DestroyNexusRequest,
-        Nexus,
-        NexusState,
-        Null,
-        PublishNexusRequest,
-        ShareProtocolNexus,
-    },
-    persistence::{
-        ChildInfo,
-        ChildState as PersistentChildState,
-        NexusInfo,
-        Reason as PersistentReason,
-    },
+use rpc::mayastor::{
+    BdevShareRequest,
+    BdevUri,
+    Child,
+    ChildState,
+    CreateNexusRequest,
+    CreateReply,
+    DestroyNexusRequest,
+    Nexus,
+    NexusState,
+    Null,
+    PublishNexusRequest,
+    ShareProtocolNexus,
 };
+
+use mayastor::bdev::{ChildInfo, NexusInfo};
+
 use std::{convert::TryFrom, thread::sleep, time::Duration};
 use url::Url;
 
@@ -60,12 +55,10 @@ async fn persist_unexpected_restart() {
     assert_eq!(nexus_info.clean_shutdown, false);
 
     let child = child_info(&nexus_info, &uuid(&child1));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     let child = child_info(&nexus_info, &uuid(&child2));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     // Restart the container where the nexus lives.
     test.restart("ms1")
@@ -81,12 +74,10 @@ async fn persist_unexpected_restart() {
     assert_eq!(nexus_info.clean_shutdown, false);
 
     let child = child_info(&nexus_info, &uuid(&child1));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     let child = child_info(&nexus_info, &uuid(&child2));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 }
 
 /// This test checks that, when a nexus is destroyed successfully the "clean
@@ -118,12 +109,10 @@ async fn persist_clean_shutdown() {
     assert_eq!(nexus_info.clean_shutdown, false);
 
     let child = child_info(&nexus_info, &uuid(&child1));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     let child = child_info(&nexus_info, &uuid(&child2));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     // Destroy the nexus
     ms1.mayastor
@@ -142,12 +131,10 @@ async fn persist_clean_shutdown() {
     assert_eq!(nexus_info.clean_shutdown, true);
 
     let child = child_info(&nexus_info, &uuid(&child1));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     let child = child_info(&nexus_info, &uuid(&child2));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 }
 
 /// This test checks that the state of a child is successfully updated in the
@@ -220,13 +207,11 @@ async fn persist_io_failure() {
 
     // Expect child1 to be healthy.
     let child = child_info(&nexus_info, &uuid(&child1));
-    assert_eq!(child.state, PersistentChildState::Open as i32);
-    assert_eq!(child.reason, PersistentReason::Unknown as i32);
+    assert!(child.healthy);
 
     // Expect child2 to be faulted due to an I/O error.
     let child = child_info(&nexus_info, &uuid(&child2));
-    assert_eq!(child.state, PersistentChildState::Faulted as i32);
-    assert_eq!(child.reason, PersistentReason::IoError as i32);
+    assert!(!child.healthy);
 }
 
 /// This test checks the behaviour when a connection to the persistent store is
